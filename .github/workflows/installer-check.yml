@@ -44,7 +44,11 @@ jobs:
           # survives freezing. Non-interactive here, so the expected answer is
           # "needs an interactive terminal"; a missing-dependency message would
           # mean Textual never made it into the bundle.
-          $out = & $exe ui 2>&1 | Out-String
+          # `gsg ui` exits 1 without a terminal by design, so assert on the
+          # message and clear the code rather than letting it fail the step.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $out = & $exe ui | Out-String
+          $global:LASTEXITCODE = 0
           if ($out -notmatch "interactive terminal") {
             throw "gsg ui is broken in the installed exe: $out"
           }
