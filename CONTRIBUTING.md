@@ -28,6 +28,21 @@ mypy src tests        # strict mode
 - **Keep `_slugify` byte-stable.** Existing `games.yaml` files depend on it; a changed scheme re-adds every tracked game under a new id.
 - New behavior needs a test. Pure logic (policies, parsers, remapping) should live in testable functions without I/O.
 
+## The website
+
+`docs/` is the landing page, served by GitHub Pages from `main`. It is one
+self-contained HTML file with no build step and no external requests — no web
+fonts, no analytics, no CDN. Please keep it that way.
+
+Preview it locally with any static server:
+
+```bash
+python -m http.server 8765 --directory docs
+```
+
+`assets/icon.png` and `assets/social-card.png` under `docs/` are generated —
+run `python packaging/make_icon.py` rather than editing them by hand.
+
 ## Where help is especially wanted
 
 - **Linux / Steam Deck testing** — the backup/restore/pull path has Linux branches that need real-world exercise (autostart + toasts are Windows-only right now).
