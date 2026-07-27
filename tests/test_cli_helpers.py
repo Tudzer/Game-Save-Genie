@@ -14,10 +14,70 @@ runner = CliRunner()
 
 
 def test_bare_gsg_shows_help_when_not_a_tty(tmp_path: Path) -> None:
-    """Non-interactive bare invocation must print help, never hang on a wizard."""
+    """Non-interactive bare invocation must print help, never hang on a wizard
+    and never launch the dashboard into a pipe."""
     result = runner.invoke(app, ["--config", str(tmp_path / "config.yaml")])
     assert result.exit_code == 0
     assert "Commands" in result.output
+
+
+def test_bare_gsg_opens_the_dashboard_when_configured(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """The Start Menu shortcut runs a bare `gsg`. Clicking the app must open
+    the dashboard, not print command-line help at a gamer."""
+    import pytest
+
+    assert isinstance(monkeypatch, pytest.MonkeyPatch)
+    opened: list[object] = []
+    monkeypatch.setattr("game_save_genie.cli._dashboard_available", lambda: True)
+    monkeypatch.setattr("game_save_genie.ui.run", opened.append)
+
+    cfg = str(tmp_path / "c.yaml")
+    runner.invoke(
+        app,
+        ["--config", cfg, "config", "--cloud-provider", "google_drive",
+         "--rclone-remote", "gdrive"],
+    )
+    result = runner.invoke(app, ["--config", cfg])
+    assert result.exit_code == 0, result.output
+    assert len(opened) == 1, "bare gsg did not open the dashboard"
+    assert "Commands" not in result.output
+
+
+def test_bare_gsg_falls_back_to_help_without_textual(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """A missing optional dependency must degrade, not crash the entry point."""
+    import pytest
+
+    assert isinstance(monkeypatch, pytest.MonkeyPatch)
+    monkeypatch.setattr("game_save_genie.cli._dashboard_available", lambda: False)
+
+    cfg = str(tmp_path / "c.yaml")
+    runner.invoke(
+        app,
+        ["--config", cfg, "config", "--cloud-provider", "google_drive",
+         "--rclone-remote", "gdrive"],
+    )
+    result = runner.invoke(app, ["--config", cfg])
+    assert result.exit_code == 0
+    assert "Commands" in result.output
+
+
+def test_help_flag_never_opens_the_dashboard(tmp_path: Path, monkeypatch: object) -> None:
+    """`gsg --help` must always be help, even on a configured tty."""
+    import pytest
+
+    assert isinstance(monkeypatch, pytest.MonkeyPatch)
+    opened: list[object] = []
+    monkeypatch.setattr("game_save_genie.cli._dashboard_available", lambda: True)
+    monkeypatch.setattr("game_save_genie.ui.run", opened.append)
+
+    result = runner.invoke(app, ["--config", str(tmp_path / "c.yaml"), "--help"])
+    assert result.exit_code == 0
+    assert "Commands" in result.output
+    assert opened == [], "--help opened the dashboard"
 
 
 def test_auto_unconfigured_non_tty_exits_with_hint(
