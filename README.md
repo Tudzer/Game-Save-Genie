@@ -10,7 +10,7 @@ Automatic, versioned, self-hosted cloud save sync for PC games — Hydra and man
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
-**[gamesavegenie website →](https://vasanthdev2004.github.io/Game-Save-Genie/)**
+**[gamesavegenie website →](https://gsg.up.railway.app/)**
 
 <img src="assets/demo.svg" alt="gsg auto: scans your games, restores newer cloud saves, backs up on game close" width="720">
 

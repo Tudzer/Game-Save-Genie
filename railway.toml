@@ -1,0 +1,14 @@
+# Railway builds the landing page container. The CLI/dashboard reads this
+# from the repo root, which is why it lives here rather than beside the
+# Dockerfile it points at.
+#
+# This repo's *product* is a Python CLI, not a web service — the only thing
+# deployed here is docs/. The self-hosted save server is a separate
+# docker compose stack under docker/ and is not what this builds.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "packaging/site/Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

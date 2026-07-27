@@ -1,0 +1,19 @@
+# The site image needs docs/ and packaging/site/ and nothing else. Everything
+# below is either the Python product, build output, or local tooling — none of
+# it belongs in a 100 KB static-site upload.
+.venv/
+.git/
+.github/
+.claude/
+build/
+dist/
+docker/
+src/
+tests/
+packaging/winget/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
