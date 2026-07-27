@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-07-27
+
+The visible release: the app finally has a face, and the background watcher can tell you when something is wrong.
 
 ### Added
 - **`gsg set <game-id> --exe <name.exe>` / `--clear-exe`** — change how a game is detected. The watcher learns a game's executable by watching it run and can learn the wrong one; until now the only repairs were hand-editing `games.yaml` or removing and re-adding the game, which is one flag away from deleting its saves.
