@@ -59,7 +59,7 @@ from .models import (
 from .notify import notify, setup_file_logging
 from .remap import _current_platform, apply_remap_to_staged_backup
 from .sync import effective_local_latest, latest_version_id, should_restore_from_cloud
-from .watcher import GameWatcher
+from .watcher import GameWatcher, is_helper_executable, unmatchable_reason
 
 app = typer.Typer(help="Game Save Genie - self-hosted cloud save sync")
 console = Console()
@@ -402,6 +402,52 @@ def list_games(ctx: typer.Context) -> None:
             _cloud_target(game, config) or "off",
         )
     console.print(table)
+
+
+@app.command(name="set")
+def set_game(
+    ctx: typer.Context,
+    game_id: str = typer.Argument(..., help="Game ID to change"),
+    exe: list[str] | None = typer.Option(
+        None, "--exe", help="Executable name to match (repeat for several)"
+    ),
+    clear_exe: bool = typer.Option(
+        False, "--clear-exe", help="Forget the executables and match by title again"
+    ),
+) -> None:
+    """Change how a tracked game is detected.
+
+    The watcher learns a game's executable by watching it run, and can learn
+    the wrong one — a launcher or crash handler that started first. This is
+    the repair, so fixing it never means hand-editing games.yaml or removing
+    and re-adding the game (one flag away from deleting its saves).
+    """
+    config_path = ctx.obj.get("config_path")
+    games = load_games(config_path)
+    game = next((g for g in games if g.id == game_id), None)
+    if not game:
+        console.print(f"[red]Game not found: {game_id}[/red]")
+        raise typer.Exit(1)
+    if not exe and not clear_exe:
+        console.print("[yellow]Nothing to change. Pass --exe or --clear-exe.[/yellow]")
+        console.print(
+            f"[dim]{game.title} currently matches: "
+            f"{', '.join(game.executable_names) or 'by title'}[/dim]"
+        )
+        raise typer.Exit(1)
+
+    if clear_exe:
+        game.executable_names = []
+        game.executables_learned = False
+        console.print(f"[green]{game.title} will be matched by title again.[/green]")
+    if exe:
+        # Given explicitly, so it is a deliberate narrowing, not a guess:
+        # title matching stops for this game.
+        game.executable_names = list(exe)
+        game.executables_learned = False
+        console.print(f"[green]{game.title} now matches: {', '.join(exe)}[/green]")
+    save_games(games, config_path)
+    console.print("[dim]Restart 'gsg auto' for this to take effect.[/dim]")
 
 
 @app.command(name="ui")
@@ -1259,11 +1305,9 @@ def auto(
         console.print(f"[green]Game started: {game.title}[/green]")
         tray.set_state(tray_mod.STATE_OK, f"Playing {game.title}")
         alert("Game started", game.title)
-        # Only learn the executable when exactly one process matches —
-        # otherwise a transient launcher/anti-cheat helper could be
-        # persisted and the real game would never match again.
-        if len(watcher.running_pids(game.id)) == 1:
-            _remember_executable(game, proc_info, config_path)
+        # Executables are learned on close, from the whole session — see
+        # _remember_executables. Learning here would see only whichever
+        # process of the tree started first, which is usually a launcher.
         # Never restore under a live process; just tell the user.
         if _cloud_newer_version(game, config, db, rclone_path) is not None:
             alert(
@@ -1282,6 +1326,10 @@ def auto(
         report_backup(game, result, uploaded)
 
     def on_close(game: Game, proc_info: ProcessInfo) -> None:
+        # Every process this game ran is known now, so a real executable can
+        # be picked out of the launcher/anti-cheat noise around it.
+        _remember_executables(game, watcher.session_process_names(game.id), config_path)
+        watcher.clear_session_names(game.id)
         console.print(f"[cyan]Game closed: {game.title}. Backing up to cloud...[/cyan]")
         with backup_lock:
             backup_and_report(game, f"Auto-backup on {_now_label()}")
@@ -1325,6 +1373,47 @@ def auto(
     # A game the watcher has never matched produces no events at all, so the
     # tray would sit green forever while that save is unprotected. Say it up
     # front, once, where the user can see it.
+    # A game whose title reduces to nothing can never be matched, yet it is
+    # still counted in "Watching N game(s)" above — the most misleading state
+    # the watcher can be in.
+    undetectable = [
+        (g.id, reason)
+        for g in all_tracked
+        if (reason := unmatchable_reason(g)) is not None
+    ]
+    if undetectable:
+        tray.escalate(
+            tray_mod.STATE_WARN, f"{len(undetectable)} game(s) cannot be detected"
+        )
+        console.print(
+            f"\n[yellow]{len(undetectable)} game(s) cannot be detected automatically:"
+            f"[/yellow]"
+        )
+        for game_id, reason in undetectable:
+            console.print(f"  [dim]{reason} — set it with "
+                          f"'gsg set {game_id} --exe <name.exe>'[/dim]")
+
+    # Names learned before this was fixed were stored without the "learned"
+    # flag, so they read as a deliberate --exe and still suppress title
+    # matching. Point at the repair rather than guessing which is which.
+    suspect = [
+        g
+        for g in all_tracked
+        if g.executable_names
+        and not g.executables_learned
+        and all(is_helper_executable(name) for name in g.executable_names)
+    ]
+    if suspect:
+        console.print(
+            f"\n[yellow]{len(suspect)} game(s) are identified only by a launcher or "
+            f"crash-handler process, which may not run every session:[/yellow]"
+        )
+        for game in suspect:
+            console.print(
+                f"  [dim]{game.title}: {', '.join(game.executable_names)} — "
+                f"'gsg set {game.id} --clear-exe' to detect it by title instead[/dim]"
+            )
+
     unprotected = [g.title for g in all_tracked if not db.get_versions(g.id)]
     if unprotected:
         tray.escalate(
@@ -2208,20 +2297,52 @@ def _reset_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _remember_executable(
-    game: Game, proc_info: ProcessInfo, config_path: Path | None
+_MAX_LEARNED_EXECUTABLES = 5
+
+
+def _remember_executables(
+    game: Game, seen_names: set[str], config_path: Path | None
 ) -> None:
-    """Persist the matched process name so future matches are exact, not fuzzy."""
-    if game.executable_names or not proc_info.name:
+    """Record the process names seen across a whole play session.
+
+    Learning used to happen on the *start* transition, guarded by "exactly one
+    process matches" — which is precisely the tick where only the earliest
+    process of the tree exists. That selected FOR launchers and crash
+    handlers rather than against them, and the single name it stored was
+    permanent. Cyberpunk ended up identified by REDEngineErrorReporter.exe.
+
+    So: learn on close, from every name seen during the session, skipping
+    obvious companion processes, and additively — the game's real executable
+    is in that set even when a launcher started first.
+    """
+    candidates = sorted(
+        name for name in seen_names if name and not is_helper_executable(name)
+    )
+    if not candidates:
         return
+
     games = load_games(config_path)
     for tracked in games:
-        if tracked.id == game.id and not tracked.executable_names:
-            tracked.executable_names = [proc_info.name]
-            game.executable_names = [proc_info.name]
-            save_games(games, config_path)
-            console.print(f"[dim]Learned executable for {game.title}: {proc_info.name}[/dim]")
-            break
+        if tracked.id != game.id:
+            continue
+        # An explicit --exe is the user's choice; never append to it.
+        if tracked.executable_names and not tracked.executables_learned:
+            return
+        known = {name.lower() for name in tracked.executable_names}
+        added = [name for name in candidates if name.lower() not in known]
+        if not added:
+            return
+        tracked.executable_names = (tracked.executable_names + added)[
+            :_MAX_LEARNED_EXECUTABLES
+        ]
+        tracked.executables_learned = True
+        game.executable_names = list(tracked.executable_names)
+        game.executables_learned = True
+        save_games(games, config_path)
+        console.print(
+            f"[dim]Learned executable(s) for {game.title}: {', '.join(added)}[/dim]"
+        )
+        return
 
 
 def _cloud_newer_version(

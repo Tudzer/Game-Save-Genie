@@ -5,6 +5,7 @@ from unittest.mock import patch
 from game_save_genie.models import Game, Platform, ProcessInfo
 from game_save_genie.watcher import (
     GameWatcher,
+    is_helper_executable,
     is_system_executable,
     title_keywords,
     title_matches_process,
@@ -40,9 +41,149 @@ class _ScriptedWatcher(GameWatcher):
         return self.script.pop(0) if self.script else {}
 
 
-def test_title_keywords_skips_short_and_common() -> None:
-    assert title_keywords("Solo Leveling: ARISE") == ["solo", "leveling"]
-    assert title_keywords("The Witcher 3") == ["witcher"]
+def test_title_keywords_drops_publisher_and_edition_words() -> None:
+    """Publisher words identify a folder, not a game. Leaving them in reduced
+    'EA Sports FC 26' to the single word 'sports'."""
+    assert title_keywords("EA Sports FC 26") == ["fc", "26"]
+    assert title_keywords("The Witcher 3: Wild Hunt") == ["witcher", "3", "wild", "hunt"]
+    assert title_keywords("Skyrim Special Edition Collection") == ["skyrim", "special"]
+
+
+def test_title_keywords_keeps_short_words() -> None:
+    """The old >=4 rule reduced these to nothing, so they could never match
+    any process while still being counted as watched."""
+    assert title_keywords("GTA V") == ["gta", "v"]
+    assert title_keywords("F1 24") == ["f1", "24"]
+    assert title_keywords("NHL 25") == ["nhl", "25"]
+
+
+def test_title_keywords_never_returns_empty() -> None:
+    """A title made only of ignored words must not become unmatchable."""
+    assert title_keywords("The Game") == ["the", "game"]
+    assert title_keywords("EA Sports") == ["ea", "sports"]
+
+
+def test_match_rejects_a_sibling_title_sharing_a_publisher() -> None:
+    """The regression that started this: 'sports' was the only keyword left
+    for FC 26, so any path containing it matched."""
+    assert (
+        title_matches_process(
+            "WRC.exe", r"D:\Games\EA SPORTS WRC\WRC.exe", "EA Sports FC 26"
+        )
+        is False
+    )
+    # ...and the neighbouring year must not match either.
+    assert (
+        title_matches_process(
+            "FC25.exe", r"D:\Games\EA SPORTS FC 25\FC25.exe", "EA Sports FC 26"
+        )
+        is False
+    )
+    # The real one still does.
+    assert (
+        title_matches_process(
+            "FC26.exe", r"D:\Games\EA SPORTS FC 26\FC26.exe", "EA Sports FC 26"
+        )
+        is True
+    )
+
+
+def test_match_uses_whole_tokens_not_substrings() -> None:
+    """A substring test over the joined path matched 'portal' inside
+    'PortableApps'."""
+    assert (
+        title_matches_process("thing.exe", r"D:\Tools\PortableApps\thing.exe", "Portal")
+        is False
+    )
+
+
+def test_a_two_letter_title_does_not_match_program_files() -> None:
+    """Caught by the existing CLI round-trip test: a game called "RA" matched
+    msedge.exe, because "ra" sits inside "Program Files"."""
+    assert (
+        title_matches_process(
+            "msedge.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            "RA",
+        )
+        is False
+    )
+    # It still matches its own install, where it is a whole path token.
+    assert title_matches_process("ra.exe", r"D:\Games\RA\ra.exe", "RA") is True
+
+
+def test_match_survives_a_folder_missing_part_of_the_title() -> None:
+    """Install folders routinely drop the subtitle."""
+    assert (
+        title_matches_process(
+            "witcher3.exe",
+            r"D:\Games\The Witcher 3\bin\x64\witcher3.exe",
+            "The Witcher 3: Wild Hunt",
+        )
+        is True
+    )
+
+
+def test_short_titles_are_matchable_again() -> None:
+    assert title_matches_process("gtav.exe", r"D:\Games\GTA V\gtav.exe", "GTA V") is True
+    assert title_matches_process("F1_24.exe", r"D:\Games\F1 24\F1_24.exe", "F1 24") is True
+
+
+def test_helper_processes_are_recognised() -> None:
+    """These are what the watcher used to learn as a game's identity."""
+    assert is_helper_executable("REDEngineErrorReporter.exe") is True
+    assert is_helper_executable("EpicGamesLauncher.exe") is True
+    assert is_helper_executable("EasyAntiCheat.exe") is True
+    assert is_helper_executable("Cyberpunk2077.exe") is False
+    assert is_helper_executable("witcher3.exe") is False
+
+
+def test_unmatchable_reason_flags_only_hopeless_games() -> None:
+    from game_save_genie.watcher import unmatchable_reason
+
+    assert unmatchable_reason(Game(id="a", title="Cyberpunk 2077", platform=Platform.WINDOWS)) is None
+    # An explicit executable is always matchable, whatever the title.
+    assert (
+        unmatchable_reason(
+            Game(id="b", title="???", platform=Platform.WINDOWS, executable_names=["g.exe"])
+        )
+        is None
+    )
+    assert unmatchable_reason(Game(id="c", title="!!!", platform=Platform.WINDOWS)) is not None
+
+
+def test_a_learned_name_does_not_disable_title_matching() -> None:
+    """A learned name is a fast path, not a narrowing rule. When it was
+    treated as narrowing, one bad guess made the game undetectable forever."""
+    learned = Game(
+        id="cp", title="Cyberpunk 2077", platform=Platform.WINDOWS,
+        executable_names=["REDEngineErrorReporter.exe"], executables_learned=True,
+    )
+    watcher = GameWatcher([learned])
+    assert watcher._matches(
+        "Cyberpunk2077.exe", r"D:\Games\Cyberpunk 2077\bin\x64\Cyberpunk2077.exe", learned
+    ) is True
+
+
+def test_an_explicit_exe_still_narrows_matching() -> None:
+    """--exe is the user choosing; it must keep suppressing title matching."""
+    explicit = Game(
+        id="cp", title="Cyberpunk 2077", platform=Platform.WINDOWS,
+        executable_names=["Cyberpunk2077.exe"], executables_learned=False,
+    )
+    watcher = GameWatcher([explicit])
+    assert watcher._matches(
+        "REDlauncher.exe", r"D:\Games\Cyberpunk 2077\REDlauncher.exe", explicit
+    ) is False
+
+
+def test_session_names_accumulate_and_clear() -> None:
+    game = _make_game()
+    watcher = GameWatcher([game])
+    watcher._session_names["test-game"] = {"launcher.exe", "game.exe"}
+    assert watcher.session_process_names("test-game") == {"launcher.exe", "game.exe"}
+    watcher.clear_session_names("test-game")
+    assert watcher.session_process_names("test-game") == set()
 
 
 def test_system_executable_detected() -> None:

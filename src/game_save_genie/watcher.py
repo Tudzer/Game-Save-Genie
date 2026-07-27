@@ -17,20 +17,74 @@ from .models import Game, ProcessInfo
 
 logger = logging.getLogger(__name__)
 
-_TITLE_SKIP_WORDS = {
+# Words that identify a publisher, a storefront, or an edition rather than the
+# game. They are dropped so a title matches an install folder that omits them —
+# and, more importantly, so a game is never identified by them: "EA Sports FC
+# 26" reduced to the single word "sports" matched "EA SPORTS WRC".
+_IGNORED_TITLE_WORDS = {
+    # articles and connectives
     "the", "a", "an", "of", "and", "or", "for", "to",
-    "arise", "overdrive", "collection", "edition", "remastered",
-    "game", "play", "launcher",
+    # publishers and storefronts that show up as parent folders
+    "ea", "sports", "ubisoft", "activision", "bethesda", "rockstar",
+    "square", "enix", "bandai", "namco", "sega", "capcom", "konami",
+    "studios", "studio", "interactive", "entertainment", "games", "game",
+    # edition and packaging markers
+    "edition", "remastered", "definitive", "collection", "goty", "deluxe",
+    "complete", "directors", "cut", "launcher", "play",
 }
+
+# A single keyword this long, matched as a whole path token, is specific
+# enough to identify a game on its own ("witcher", "cyberpunk").
+_DISTINCTIVE_KEYWORD_LENGTH = 5
+
+# Below this length, a run-together title is only accepted as a whole token,
+# never as a substring: a game called "RA" would otherwise match every path
+# containing "Program Files".
+_MIN_SUBSTRING_LENGTH = 4
+
+
+def _tokens(text: str) -> list[str]:
+    """Lowercase alphanumeric words, split on anything else."""
+    return [word.lower() for word in re.split(r"[^a-zA-Z0-9]+", text) if word]
+
+
+def _slug(text: str) -> str:
+    """Lowercase alphanumerics only — 'EA SPORTS FC 26' -> 'easportsfc26'."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
 def title_keywords(title: str) -> list[str]:
-    """Return significant lowercase words from a game title for matching."""
-    return [
-        word.lower()
-        for word in re.split(r"[^a-zA-Z0-9]+", title)
-        if len(word) >= 4 and word.lower() not in _TITLE_SKIP_WORDS
-    ]
+    """Significant lowercase words from a game title, for matching.
+
+    Short words are kept: version numbers are frequently the only thing
+    distinguishing one title from its neighbours ("FC 26" from "FC 25"), and
+    the old rule of dropping anything under four characters reduced "GTA V"
+    and "F1 24" to nothing at all, making them permanently undetectable.
+
+    Filtering never returns an empty list — a title made entirely of ignored
+    words falls back to its raw words rather than becoming unmatchable.
+    """
+    words = _tokens(title)
+    keywords = [word for word in words if word not in _IGNORED_TITLE_WORDS]
+    return keywords or words
+
+
+# Substrings of process names that belong to something running *beside* the
+# game — a crash handler, launcher, updater, or anti-cheat. These are poor
+# identities: Cyberpunk was learned as REDEngineErrorReporter.exe, so the game
+# was thereafter detected only when its crash reporter happened to be up.
+_HELPER_PROCESS_MARKERS = (
+    "crashreport", "crashhandler", "crashpad", "errorreport",
+    "launcher", "updater", "installer", "setup", "redistributable",
+    "anticheat", "easyanticheat", "battleye", "eacl",
+    "overlay", "webhelper", "helper", "service", "bootstrapper",
+)
+
+
+def is_helper_executable(name: str) -> bool:
+    """Whether a process name looks like a companion process, not the game."""
+    slug = _slug(name)
+    return any(marker in slug for marker in _HELPER_PROCESS_MARKERS)
 
 
 def is_system_executable(exe: str | None) -> bool:
@@ -44,24 +98,68 @@ def is_system_executable(exe: str | None) -> bool:
 def title_matches_process(name: str, exe: str | None, title: str) -> bool:
     """Fuzzy-match a game title against a process, avoiding false positives.
 
-    A match requires a title keyword (or the whole compacted title) to appear
-    in the executable's full path. Bare process-name matches are intentionally
-    rejected because generic names cause false positives. System executables
+    Evidence is weighed per path *segment*, and keywords must match whole
+    tokens rather than appear anywhere in the path. A substring test over the
+    joined path is far too loose: "portal" matches ".../portable/...", and one
+    generic word matched anywhere was enough to claim a process.
+
+    A false positive is the expensive failure. It is not just a wrong backup:
+    the matched name is learned as the game's executable, so the game is
+    thereafter identified by a process belonging to something else. A false
+    negative only means the game is never detected, which `gsg auto` and
+    `gsg status` now report so it can be fixed with `--exe`.
+
+    Bare process names without a path never match, and system executables
     never match.
     """
-    if is_system_executable(exe):
+    if is_system_executable(exe) or not exe:
         return False
 
     keywords = title_keywords(title)
-    if not keywords or not exe:
+    if not keywords:
         return False
 
-    exe_compact = exe.lower().replace("\\", "/").replace(" ", "")
-    compact_title = "".join(keywords)
-    if compact_title and compact_title in exe_compact:
-        return True
+    joined = "".join(keywords)
+    for segment in exe.replace("\\", "/").split("/"):
+        if not segment:
+            continue
+        segment_tokens = set(_tokens(segment))
+        # 1. The whole title, run together, inside one segment. Covers both
+        #    "EA SPORTS FC 26\" and "Cyberpunk2077.exe" — but only once it is
+        #    long enough that an accidental substring is implausible.
+        if len(joined) >= _MIN_SUBSTRING_LENGTH and joined in _slug(segment):
+            return True
+        # 1b. Short titles must land on a whole token instead.
+        if joined and joined in segment_tokens:
+            return True
 
-    return any(word in exe_compact for word in keywords)
+        # 2. One distinctive keyword as a whole token: ".../The Witcher 3/".
+        if any(
+            word in segment_tokens and len(word) >= _DISTINCTIVE_KEYWORD_LENGTH
+            for word in keywords
+        ):
+            return True
+        # 3. Two different keywords in the SAME segment. Short words like
+        #    "fc" and "26" only count together, and only when they appear in
+        #    one place — which is what separates "FC 26" from "WRC".
+        if len(segment_tokens.intersection(keywords)) >= 2:
+            return True
+
+    return False
+
+
+def unmatchable_reason(game: Game) -> str | None:
+    """Why this game can never be detected, or None if it can.
+
+    A game with no usable keywords and no explicit executable produces no
+    watcher events at all — it is counted in "Watching N game(s)" and then
+    silently never backed up.
+    """
+    if game.executable_names:
+        return None
+    if not title_keywords(game.title):
+        return f"'{game.title}' has no matchable words"
+    return None
 
 
 class GameWatcher:
@@ -87,6 +185,10 @@ class GameWatcher:
         self._periodic_interval = periodic_interval
         self._idle_interval = idle_interval
         self._stop = threading.Event()
+        # Every process name seen for a game during the current session, so a
+        # name can be learned from the whole session rather than from whatever
+        # happened to be running first.
+        self._session_names: dict[str, set[str]] = {}
         self.on_game_close: Callable[[Game, ProcessInfo], None] | None = None
         self.on_game_start: Callable[[Game, ProcessInfo], None] | None = None
         self.on_periodic_backup: Callable[[Game], None] | None = None
@@ -149,7 +251,16 @@ class GameWatcher:
             for game in self.games.values():
                 if self._matches(name, exe, game):
                     found.setdefault(game.id, set()).add(proc.pid)
+                    if name:
+                        self._session_names.setdefault(game.id, set()).add(name)
         return found
+
+    def session_process_names(self, game_id: str) -> set[str]:
+        """Process names seen for this game since it was last closed."""
+        return set(self._session_names.get(game_id, set()))
+
+    def clear_session_names(self, game_id: str) -> None:
+        self._session_names.pop(game_id, None)
 
     def tick(self) -> None:
         """Process one tick of the watcher loop."""
@@ -252,8 +363,11 @@ class GameWatcher:
             if exe and executable.lower() in exe.lower():
                 return True
 
-        # Fallback: match by game title keywords in process name/exe path
-        if not game.executable_names:
+        # Fall back to the title. An explicit --exe is the user narrowing
+        # matching on purpose, so it suppresses this — but a LEARNED name must
+        # not, or a single bad guess (a crash handler caught on the first tick)
+        # makes the game undetectable for good with no way to notice.
+        if not game.executable_names or game.executables_learned:
             return title_matches_process(name, exe, game.title)
 
         return False
