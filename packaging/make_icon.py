@@ -162,6 +162,11 @@ def main() -> int:
 
     master = render(512, BRAND_TOP, BRAND_BOTTOM)
     master.save(ASSETS / "icon.png")
+    # The website is served from docs/, so it cannot reach ../assets. Write the
+    # copy here rather than leaving someone to remember it and let them drift.
+    site_assets = ROOT / "docs" / "assets"
+    if site_assets.is_dir():
+        master.save(site_assets / "icon.png")
 
     # Render each ICO size independently rather than letting the encoder
     # downscale one bitmap: the 16px entry needs its own LANCZOS pass or the
