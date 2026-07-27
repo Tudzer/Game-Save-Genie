@@ -211,3 +211,35 @@ def test_running_pids_reflects_current_tick() -> None:
 
     assert seen == [2]
     assert watcher.is_running(game.id) is True
+
+
+def test_stop_ends_the_watch_loop() -> None:
+    """The tray's Quit item calls stop() from another thread; the loop must
+    return instead of running until the process is killed."""
+    import threading
+    import time
+
+    game = _make_game()
+    watcher = _ScriptedWatcher([game])
+    watcher.script = [{} for _ in range(1000)]
+
+    finished = threading.Event()
+
+    def run() -> None:
+        watcher.watch_loop(interval=0.05)
+        finished.set()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    time.sleep(0.15)
+    watcher.stop()
+
+    assert finished.wait(timeout=5), "watch_loop ignored stop()"
+
+
+def test_stop_before_the_loop_starts_is_honoured() -> None:
+    """A Quit click racing startup must not leave the loop running forever."""
+    watcher = _ScriptedWatcher([_make_game()])
+    watcher.script = [{} for _ in range(10)]
+    watcher.stop()
+    watcher.watch_loop(interval=30.0)  # returns immediately, does not sleep

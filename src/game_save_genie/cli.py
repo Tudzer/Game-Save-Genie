@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO
@@ -15,6 +16,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__, custom
+from . import tray as tray_mod
 from .archive import safe_extract_zip, sha256_file, zip_directory
 from .cloud import (
     _remote_path,
@@ -906,6 +908,9 @@ def auto(
         False, "--no-wizard",
         help="Exit with an error instead of launching setup when unconfigured (used by autostart)",
     ),
+    no_tray: bool = typer.Option(
+        False, "--no-tray", help="Do not show the system tray icon"
+    ),
 ) -> None:
     """Fully automatic cloud backup: scans for Hydra/manual games, watches them, and backs up to your configured cloud storage.
 
@@ -1027,9 +1032,85 @@ def auto(
     db = Database(get_data_dir() / "versions.db")
     rclone_path = get_rclone_path(config_path)
 
+    # The tray and the watcher can both start a backup, so everything that
+    # touches save files takes this first. Watcher callbacks are already
+    # serialised with each other; the tray's menu runs on its own thread.
+    backup_lock = threading.Lock()
+    log = logging.getLogger(__name__)
+
+    def action_backup_now() -> None:
+        with backup_lock:
+            for game in all_tracked:
+                backup_and_report(game, f"Manual backup on {_now_label()}")
+
+    def action_status() -> None:
+        _open_status_window(config_path)
+
+    def action_open_logs() -> None:
+        _open_path(get_data_dir() / "logs")
+
+    def action_quit() -> None:
+        # Stop the loop first: the watcher owns the main thread, and once it
+        # returns the `finally` below tears the tray down and frees the lock.
+        watcher.stop()
+        tray.stop()
+
+    tray: tray_mod.NullTray | tray_mod.Tray = (
+        tray_mod.NullTray()
+        if no_tray
+        else tray_mod.create_tray(
+            {
+                "backup_now": action_backup_now,
+                "status": action_status,
+                "open_logs": action_open_logs,
+                "quit": action_quit,
+            }
+        )
+    )
+
+    def alert(title: str, message: str) -> None:
+        """Tell the user, wherever they can actually see it.
+
+        Under autostart the console is hidden, so a print reaches nobody. The
+        tray balloon is preferred (it carries our icon and costs no process);
+        the platform notifier is the fallback.
+        """
+        log.info("%s: %s", title, message)
+        if not tray.notify(title, message):
+            notify(title, message)
+
+    def report_backup(game: Game, result: BackupResult, uploaded: bool | None) -> None:
+        """Surface one backup outcome to console, log, tray, and notification.
+
+        Failures used to print to a hidden console and nothing else — no
+        toast, no ERROR line, no status change. Weeks of them looked
+        identical to everything working.
+        """
+        if not result.success:
+            console.print(f"[red]{result.message}[/red]")
+            log.error("Backup failed for %s: %s", game.title, result.message)
+            tray.escalate(tray_mod.STATE_ERROR, f"{game.title}: backup failed")
+            alert("Backup FAILED", f"{game.title}: {result.message}")
+            return
+        if uploaded is False:
+            console.print(f"[red]{game.title}: save is backed up locally but not uploaded.[/red]")
+            tray.escalate(tray_mod.STATE_ERROR, f"{game.title}: upload failed")
+            alert(
+                "Cloud upload FAILED",
+                f"{game.title}: backed up locally, but the upload did not complete.",
+            )
+            return
+        if result.version is None:
+            console.print(f"[dim]{result.message}[/dim]")
+            return
+        console.print(f"[green]{result.message}[/green]")
+        tray.set_state(tray_mod.STATE_OK, f"{game.title} backed up")
+        alert("Save backed up", game.title)
+
     def on_start(game: Game, proc_info: ProcessInfo) -> None:
         console.print(f"[green]Game started: {game.title}[/green]")
-        notify("Game started", game.title)
+        tray.set_state(tray_mod.STATE_OK, f"Playing {game.title}")
+        alert("Game started", game.title)
         # Only learn the executable when exactly one process matches —
         # otherwise a transient launcher/anti-cheat helper could be
         # persisted and the real game would never match again.
@@ -1037,38 +1118,34 @@ def auto(
             _remember_executable(game, proc_info, config_path)
         # Never restore under a live process; just tell the user.
         if _cloud_newer_version(game, config, db, rclone_path) is not None:
-            notify(
+            alert(
                 "Newer cloud save exists",
                 f"{game.title}: not applied because the game is running. "
                 f"It will be restored after you quit.",
             )
 
+    def backup_and_report(game: Game, label: str) -> None:
+        result = _run_backup(
+            game, config, db, ludusavi_path, label=label, origin="auto",
+        )
+        uploaded: bool | None = None
+        if result.success and result.version and result.files_changed > 0:
+            uploaded = _cloud_upload(ctx, game, result.version, dry_run=False)
+        report_backup(game, result, uploaded)
+
     def on_close(game: Game, proc_info: ProcessInfo) -> None:
         console.print(f"[cyan]Game closed: {game.title}. Backing up to cloud...[/cyan]")
-        result = _run_backup(
-            game, config, db, ludusavi_path,
-            label=f"Auto-backup on {_now_label()}", origin="auto",
-        )
-        console.print(f"{'[green]' if result.success else '[red]'}{result.message}[/]")
-        if result.success and result.version and result.files_changed > 0:
-            _cloud_upload(ctx, game, result.version, dry_run=False)
-            notify("Save backed up", game.title)
+        with backup_lock:
+            backup_and_report(game, f"Auto-backup on {_now_label()}")
 
     def on_periodic(game: Game) -> None:
         console.print(f"[cyan]Periodic backup: {game.title}...[/cyan]")
-        result = _run_backup(
-            game, config, db, ludusavi_path,
-            label=f"Periodic backup on {_now_label()}", origin="auto",
-        )
-        if result.success and result.version and result.files_changed > 0:
-            console.print(f"[green]{result.message}[/green]")
-            _cloud_upload(ctx, game, result.version, dry_run=False)
-            notify("Save backed up", game.title)
-        else:
-            console.print(f"[dim]{result.message}[/dim]")
+        with backup_lock:
+            backup_and_report(game, f"Periodic backup on {_now_label()}")
 
     def on_idle(game: Game) -> None:
-        _auto_restore_if_idle(game, config, db, rclone_path, ludusavi_path)
+        with backup_lock:
+            _auto_restore_if_idle(game, config, db, rclone_path, ludusavi_path)
 
     # Cloud restores only ever run for games that are NOT running: once at
     # startup, then at every idle check. Restoring on game start would race
@@ -1092,12 +1169,91 @@ def auto(
     if periodic > 0:
         console.print(f"[dim]Periodic backup every {int(periodic)}s during gameplay.[/dim]")
     console.print("[dim]Press Ctrl+C to stop. Run 'gsg auto --install' to start on boot.[/dim]\n")
+
+    tray.start()
+    if tray.available:
+        console.print("[dim]Tray icon active — right-click it for status and manual backup.[/dim]")
+
+    # A game the watcher has never matched produces no events at all, so the
+    # tray would sit green forever while that save is unprotected. Say it up
+    # front, once, where the user can see it.
+    unprotected = [g.title for g in all_tracked if not db.get_versions(g.id)]
+    if unprotected:
+        tray.escalate(
+            tray_mod.STATE_WARN,
+            f"{len(unprotected)} game(s) never backed up",
+        )
+        console.print(
+            f"[yellow]Never backed up: {', '.join(unprotected)}[/yellow]\n"
+            "[dim]If these never back up on their own, their process isn't being "
+            "matched — set it with 'gsg add <title> --exe <name.exe>'.[/dim]"
+        )
+
     try:
         watcher.watch_loop(interval=interval)
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped watching.[/yellow]")
     finally:
+        tray.stop()
         lock.close()
+
+
+_CREATE_NEW_CONSOLE = 0x00000010
+
+
+def _open_path(path: Path) -> None:
+    """Open a folder in the desktop's file manager, best effort."""
+    import subprocess
+
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            # Fetched dynamically: os.startfile exists only on Windows, so a
+            # direct call is an attr-defined error when CI type-checks on Linux
+            # and an unused-ignore error when it type-checks on Windows.
+            startfile = getattr(os, "startfile", None)
+            if startfile is not None:
+                startfile(path)
+        else:
+            subprocess.Popen(
+                ["xdg-open", str(path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    except (OSError, ValueError) as exc:
+        logging.getLogger(__name__).warning("Could not open %s: %s", path, exc)
+
+
+def _open_status_window(config_path: Path | None) -> None:
+    """Show `gsg status` in a window the user can actually read.
+
+    The watcher's own console is hidden under autostart, so status has to run
+    somewhere new rather than printing into the void.
+    """
+    import subprocess
+
+    exe = _find_gsg_exe()
+    if exe is None:
+        logging.getLogger(__name__).warning("Cannot show status: gsg executable not found.")
+        return
+    args = [str(exe), "status"]
+    if config_path:
+        args = [str(exe), "--config", str(config_path), "status"]
+    try:
+        if os.name == "nt":
+            # /k keeps the window open after status has printed.
+            subprocess.Popen(["cmd", "/k", *args], creationflags=_CREATE_NEW_CONSOLE)
+            return
+        import shutil
+
+        for term in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
+            if shutil.which(term):
+                subprocess.Popen([term, "-e", *args])
+                return
+        # No terminal to borrow: the log folder is the next best thing.
+        _open_path(get_data_dir() / "logs")
+    except (OSError, ValueError) as exc:
+        logging.getLogger(__name__).warning("Could not show status: %s", exc)
 
 
 def _startup_vbs_path() -> Path:
@@ -1845,19 +2001,25 @@ def _cloud_upload(
     game: Game,
     version: SaveVersion,
     dry_run: bool,
-) -> None:
+) -> bool:
+    """Upload a version to the game's effective remote.
+
+    Returns False only when an upload was actually attempted and failed, so a
+    caller can tell "nothing to do" apart from "your save did not reach the
+    cloud" — the tray and its notifications depend on that distinction.
+    """
     config_path = ctx.obj.get("config_path")
     config = load_config(config_path)
     if not _effective_provider(game, config):
-        return
+        return True
     rclone_path = get_rclone_path(config_path)
     remote_name = _effective_remote(game, config)
     if not remote_name:
         console.print("[red]No rclone remote configured.[/red]")
-        return
+        return False
     if dry_run:
         console.print(f"[cyan]Would upload {version.id} for {game.title}[/cyan]")
-        return
+        return True
     result = upload_save_cas(
         rclone_path,
         game,
@@ -1867,14 +2029,20 @@ def _cloud_upload(
         extra_args=config.custom_rclone_args,
     )
     console.print(f"[{'green' if result.success else 'red'}]{result.message}[/]")
-    if result.success:
-        db = Database(get_data_dir() / "versions.db")
-        db.mark_cloud_synced(version.id, result.remote_path)
-        pruned = prune_remote_versions(
-            rclone_path, game, remote_name, config.remote_root, keep=config.max_versions
+    if not result.success:
+        logging.getLogger(__name__).error(
+            "Cloud upload failed for %s: %s", game.title, result.message
         )
-        if pruned:
-            console.print(f"[dim]Pruned {len(pruned)} old cloud version(s).[/dim]")
+        return False
+
+    db = Database(get_data_dir() / "versions.db")
+    db.mark_cloud_synced(version.id, result.remote_path)
+    pruned = prune_remote_versions(
+        rclone_path, game, remote_name, config.remote_root, keep=config.max_versions
+    )
+    if pruned:
+        console.print(f"[dim]Pruned {len(pruned)} old cloud version(s).[/dim]")
+    return True
 
 
 def _cloud_restore_dir(game_id: str) -> Path:
