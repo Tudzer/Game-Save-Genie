@@ -24,7 +24,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
@@ -156,6 +156,55 @@ def render(
     return canvas.resize((size, size), Image.Resampling.LANCZOS)
 
 
+def _load_font(size: int, bold: bool = False) -> Any:
+    """A real UI font if one is available, else Pillow's bitmap default.
+
+    The card is generated once and committed, so a missing font degrades the
+    render rather than breaking anyone's build.
+    """
+    candidates = (
+        ["segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf"]
+        if bold
+        else ["segoeui.ttf", "arial.ttf", "DejaVuSans.ttf"]
+    )
+    for name in candidates:
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def render_social_card() -> Image.Image:
+    """The 1200x630 image link previews show — Reddit, Discord, Twitter."""
+    width, height = 1200, 630
+    card = _vertical_gradient(height, (18, 21, 32), (28, 24, 54)).convert("RGBA")
+    card = card.resize((width, height), Image.Resampling.NEAREST)
+
+    glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((-260, -420, 900, 340), fill=(108, 92, 231, 60))
+    card = Image.alpha_composite(card, glow.filter(ImageFilter.GaussianBlur(150)))
+
+    mark = render(200, BRAND_TOP, BRAND_BOTTOM)
+    card.paste(mark, (96, 118), mark)
+
+    draw = ImageDraw.Draw(card)
+    draw.text((96, 356), "Game Save Genie", font=_load_font(76, bold=True), fill=(240, 242, 248))
+    draw.text(
+        (96, 452),
+        "Steam Cloud for the games that don't have it.",
+        font=_load_font(36),
+        fill=(178, 186, 204),
+    )
+    draw.text(
+        (96, 516),
+        "Automatic, versioned, self-hosted save sync  ·  MIT  ·  no subscription",
+        font=_load_font(26),
+        fill=(124, 134, 153),
+    )
+    return card.convert("RGB")
+
+
 def main() -> int:
     ASSETS.mkdir(parents=True, exist_ok=True)
     TRAY_ASSETS.mkdir(parents=True, exist_ok=True)
@@ -167,6 +216,7 @@ def main() -> int:
     site_assets = ROOT / "docs" / "assets"
     if site_assets.is_dir():
         master.save(site_assets / "icon.png")
+        render_social_card().save(site_assets / "social-card.png")
 
     # Render each ICO size independently rather than letting the encoder
     # downscale one bitmap: the 16px entry needs its own LANCZOS pass or the

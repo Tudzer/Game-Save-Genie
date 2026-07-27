@@ -7,10 +7,19 @@
 <meta name="description" content="Automatic, versioned, self-hosted cloud save sync for PC games. Hydra, GOG offline installers, repacks, emulators — anything a launcher isn't protecting. Your saves, your cloud, no subscription.">
 <link rel="icon" href="assets/icon.png" type="image/png">
 
+<!-- Absolute URLs on purpose: Reddit, Discord and Twitter do not resolve a
+     relative og:image, they just drop the preview. -->
 <meta property="og:title" content="Game Save Genie">
-<meta property="og:description" content="Steam Cloud for the games that don't have it. Automatic, versioned, self-hosted save sync.">
+<meta property="og:description" content="Steam Cloud for the games that don't have it. Automatic, versioned, self-hosted save sync for PC games.">
 <meta property="og:type" content="website">
-<meta property="og:image" content="assets/icon.png">
+<meta property="og:url" content="https://vasanthdev2004.github.io/Game-Save-Genie/">
+<meta property="og:image" content="https://vasanthdev2004.github.io/Game-Save-Genie/assets/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Game Save Genie">
+<meta name="twitter:description" content="Steam Cloud for the games that don't have it.">
+<meta name="twitter:image" content="https://vasanthdev2004.github.io/Game-Save-Genie/assets/social-card.png">
 
 <style>
 /* Self-contained on purpose: no fonts, analytics, or assets from anywhere
@@ -22,7 +31,10 @@
   --line: #232a38;
   --text: #e6e9ef;
   --muted: #99a2b4;
-  --dim: #6b7487;
+  /* 4.75:1 against --bg-raised, the worst case it appears on. The previous
+     value was 3.71:1 and is used for captions and footer text, which is
+     small enough to need the full AA ratio. */
+  --dim: #7c8699;
   --brand: #6c5ce7;
   --brand-2: #4a80f0;
   --ok: #3fb950;
@@ -43,7 +55,15 @@ body {
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
 }
-a { color: #8fb0ff; }
+a { color: #9dbaff; }
+
+/* The browser default focus ring is close to invisible on this background,
+   which makes the whole page unusable by keyboard. */
+:where(a, button, summary, [tabindex]):focus-visible {
+  outline: 2px solid #9dbaff;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
 h1, h2, h3 { line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 .5em; }
 p { margin: 0 0 1em; }
 
