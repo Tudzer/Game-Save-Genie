@@ -2,7 +2,18 @@
 
 ## Unreleased
 
+### Added
+- **`gsg ui` — an interactive dashboard.** Restoring a save was the one genuinely browse-and-select task in the product, and the CLI made you do it by eye: read a version id out of `gsg versions`, retype it into `gsg pull --version`. Copying a timestamp between two commands is a bad thing to ask of someone who has just lost progress. Now you arrow onto the version you want and press `r`. Games on the left with their version count, last backup and real cloud target; versions on the right, local or cloud (`c` toggles); a log pane for results. `b` backs up, `r` restores, `F5` refreshes.
+  - Restores always confirm first, and run the **same** code path as `gsg restore` / `gsg pull` — verification, the pre-restore safety backup, and the never-under-a-live-game rule are not reimplemented, so they cannot drift between the two front ends.
+  - Every rclone and Ludusavi call runs on a worker thread, so the interface never freezes during an upload.
+- **The app has a face.** A proper lamp icon now ships as the executable icon, the setup wizard icon, the Add/Remove Programs entry, and the Start Menu shortcut — all of which previously fell back to a generic default. Generated from a reviewable script (`packaging/make_icon.py`), not a committed mystery binary.
+- **System tray icon for `gsg auto`.** The watcher runs hidden by design, which meant it had no way to tell you anything. It now sits in the notification area, colour-coded — blue when everything is backed up, amber when a tracked game has never been backed up, red when a backup or upload failed — with the last event in the tooltip. Right-click for **Back up now**, **Show status**, **Open log folder**, and **Quit**. Disable with `gsg auto --no-tray`. Entirely optional: if the tray can't be created (headless Linux, no notification area, missing dependency) the watcher runs exactly as before.
+
 ### Fixed
+- **Backup failures are no longer invisible.** Windows autostart launches the watcher with a hidden console, so every failure message went to a screen nobody could see — and notifications only fired on *success*. A failing backup now produces a desktop notification, an `ERROR` log line, and a red tray icon. Weeks of failures used to look identical to everything working.
+- **A failed cloud upload is reported as one.** `_cloud_upload` returned nothing, so the watcher announced "Save backed up" whether or not the upload succeeded. It now reports upload failures distinctly from local-backup failures.
+- `gsg auto` names games that have never been backed up at startup, instead of leaving them silently unprotected.
+- The watcher can be stopped cleanly (`GameWatcher.stop()`), so tray Quit and Ctrl+C both shut down immediately rather than waiting out the poll interval.
 - **`gsg list` / `gsg status` now show where saves actually go.** The Cloud column printed a per-game provider label that was stored when the game was added and never updated — so after switching cloud providers it reported the old one (e.g. `s3`) for saves that were sitting safely in the new provider all along. It is now a **Cloud Target** column showing the real destination (`gdrive:game-save-genie`), derived on every render so it cannot go stale.
 - **Cross-machine sync is no longer silently one-way.** A game with no explicit per-game provider was uploaded by `gsg auto` but ignored by the cloud-restore check, so its saves went up and could never come back down. Every command now resolves a game's provider and remote the same way: per-game setting if present, otherwise the global config.
 - **`gsg backup` uploads what `gsg auto` uploads.** The two disagreed about whether a game was cloud-enabled.

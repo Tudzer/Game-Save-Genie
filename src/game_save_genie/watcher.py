@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -85,6 +86,7 @@ class GameWatcher:
         self._last_idle_check: dict[str, float] = {}
         self._periodic_interval = periodic_interval
         self._idle_interval = idle_interval
+        self._stop = threading.Event()
         self.on_game_close: Callable[[Game, ProcessInfo], None] | None = None
         self.on_game_start: Callable[[Game, ProcessInfo], None] | None = None
         self.on_periodic_backup: Callable[[Game], None] | None = None
@@ -211,12 +213,22 @@ class GameWatcher:
                     self._safe_callback(self.on_idle_check, game)
                     self._last_idle_check[game_id] = now
 
+    def stop(self) -> None:
+        """Ask :meth:`watch_loop` to return after the current tick.
+
+        Safe to call from another thread — the tray's Quit item does exactly
+        that. Waiting on an Event rather than sleeping means shutdown is
+        immediate instead of taking up to ``interval`` seconds.
+        """
+        self._stop.set()
+
     def watch_loop(self, interval: float = 5.0) -> None:
-        """Run the watcher loop indefinitely."""
+        """Run the watcher loop until :meth:`stop` is called."""
         logger.info("Starting game watcher with %d tracked games", len(self.games))
-        while True:
+        while not self._stop.is_set():
             self.tick()
-            time.sleep(interval)
+            if self._stop.wait(interval):
+                break
 
     def _safe_callback(self, callback: Callable[..., None], *args: Any) -> None:
         """Run a callback without letting its failure kill the watch loop."""

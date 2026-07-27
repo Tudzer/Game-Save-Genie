@@ -35,6 +35,15 @@ dependencies = [
     "psutil>=5.9.0",
     "pyyaml>=6.0",
     "watchdog>=3.0",
+    # Tray icon. Optional at runtime — gsg.tray degrades to a no-op if these
+    # are missing or there is no notification area — but installed by default
+    # because a hidden background daemon with no visible status is the single
+    # worst thing about running one.
+    "pystray>=0.19",
+    "Pillow>=10.0",
+    # Interactive dashboard (`gsg ui`). Same author as rich, which is already
+    # a dependency; the command degrades to a clear error if it is missing.
+    "textual>=0.80",
 ]
 
 [project.optional-dependencies]
@@ -65,7 +74,7 @@ game-save-genie = "game_save_genie.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-game_save_genie = ["py.typed"]
+game_save_genie = ["py.typed", "assets/tray/*.png"]
 
 [tool.black]
 line-length = 100
@@ -113,3 +122,10 @@ python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# pystray ships no py.typed marker. It is reached only through gsg.tray, which
+# holds it behind Any-typed parameters precisely so the rest of the codebase
+# stays strictly typed.
+module = ["pystray", "pystray.*"]
+ignore_missing_imports = true

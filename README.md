@@ -23,6 +23,7 @@ Game Save Genie runs quietly in the background and gives you what the launchers 
 - 🕹️ **Knows 19,000+ games** — save locations detected via the open-source [Ludusavi](https://github.com/mtkennerly/ludusavi) database, plus process watching to know when you're playing
 - 🎮 **Emulators too** — `gsg add --path` backs up any folder or file (RetroArch, PCSX2, Dolphin, memcards, save states), so games Ludusavi doesn't know are covered as well
 - 💾 **Backs up automatically** — when a game closes, and every 10 minutes while it runs
+- 🔔 **Tells you when something breaks** — a tray icon shows at a glance whether your saves are safe (and goes red, with a notification, if a backup or upload fails) instead of failing silently in the background
 - 🕰️ **Every session is a version** — immutable, checksummed snapshots; roll back to any point with `gsg restore --version`
 - ☁️ **Your own cloud** — Google Drive (free 15 GB), OneDrive, any S3 bucket, or [anything rclone speaks](https://rclone.org/overview/); retention is enforced so it never fills up, and **delta uploads** only send the save files that changed (an unchanged 40 MB slot is never re-uploaded)
 - 🖥️ **Follows you between PCs** — `gsg pull` restores on any machine, remapping paths saved under a different Windows username
@@ -68,6 +69,7 @@ That's the whole setup. A wizard finds your games, connects your cloud (Google D
 ```bash
 gsg auto                  # the only command most people need — watch + backup + restore
 gsg auto --install        # start hidden at logon (per-user, no admin needed)
+gsg ui                    # interactive dashboard: browse versions, restore by arrow key
 
 gsg status                # per-game overview, storage meter, quota warning
 gsg scan                  # what's installed (--source all to include Steam/Epic/Xbox)
