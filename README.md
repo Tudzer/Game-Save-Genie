@@ -45,6 +45,8 @@ gsg
 
 That's the whole setup. A wizard finds your games, connects your cloud (Google Drive/OneDrive open a browser — sign in, click Allow, done), and offers start-at-boot. From then on `gsg auto` protects everything, hands-free. Ludusavi and rclone are downloaded automatically on first use.
 
+Once you're set up, running `gsg` again opens the **dashboard** — your games, every version, and a one-key restore. No ids to copy.
+
 **Homelab?** Run your own save server with one `docker compose up` and connect it with `gsg setup-s3` — see [docker/README.md](docker/README.md). Works with any S3-compatible store (MinIO, Garage, TrueNAS…), supports per-friend accounts, and your saves never leave your network.
 
 > **Status:** single-machine backup on Windows is stable and used daily. Cross-machine sync (`gsg pull`) and Linux/Steam Deck support are **beta** — solid in testing, but not yet battle-tested across many real setups. Keep a second copy of anything precious for now, and please [file an issue](https://github.com/Vasanthdev2004/Game-Save-Genie/issues) with anything you hit — that feedback is what moves it out of beta.

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **Running `gsg` opens the dashboard.** Once cloud storage is configured, a bare `gsg` launches the interactive dashboard instead of printing command-line help. This matters most where it isn't obvious: the Windows Start Menu shortcut runs a bare `gsg`, so clicking "Game Save Genie" used to open a black console showing help text. First run still gets the setup wizard, `gsg --help` is still help, and a non-interactive `gsg` (piped or redirected) still prints help so scripts are unaffected.
 - **`gsg ui` — an interactive dashboard.** Restoring a save was the one genuinely browse-and-select task in the product, and the CLI made you do it by eye: read a version id out of `gsg versions`, retype it into `gsg pull --version`. Copying a timestamp between two commands is a bad thing to ask of someone who has just lost progress. Now you arrow onto the version you want and press `r`. Games on the left with their version count, last backup and real cloud target; versions on the right, local or cloud (`c` toggles); a log pane for results. `b` backs up, `r` restores, `F5` refreshes.
   - Restores always confirm first, and run the **same** code path as `gsg restore` / `gsg pull` — verification, the pre-restore safety backup, and the never-under-a-live-game rule are not reimplemented, so they cannot drift between the two front ends.
   - Every rclone and Ludusavi call runs on a worker thread, so the interface never freezes during an upload.

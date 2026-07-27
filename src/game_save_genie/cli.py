@@ -95,7 +95,10 @@ def main(
     ctx.obj["config_path"] = config
 
     if ctx.invoked_subcommand is None:
-        # Bare `gsg`: first run gets the guided setup; otherwise show help.
+        # Bare `gsg`: first run gets the guided setup, after that the
+        # dashboard. The Windows Start Menu shortcut runs a bare `gsg`, so
+        # this is what someone sees when they launch the app by clicking it —
+        # a wall of command-line help was the wrong answer to that.
         if (
             not _cloud_configured(config)
             and sys.stdin.isatty()
@@ -106,7 +109,37 @@ def main(
                 "automatic backup."
             )
             return
+        if _open_dashboard(config):
+            return
         console.print(ctx.get_help())
+
+
+def _dashboard_available() -> bool:
+    """Whether the TUI can run here: a real terminal and Textual installed."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        # Piped or redirected: help is readable and scriptable, a TUI is not.
+        return False
+    try:
+        import textual  # noqa: F401
+    except ImportError as exc:
+        logging.getLogger(__name__).info("Dashboard unavailable: %s", exc)
+        return False
+    return True
+
+
+def _open_dashboard(config_path: Path | None) -> bool:
+    """Run the dashboard. Returns False if it could not be opened at all.
+
+    A False return is a signal to fall back to help, never an error — a bare
+    `gsg` in a pipe or on a machine without Textual must still do something
+    sensible.
+    """
+    if not _dashboard_available():
+        return False
+    from . import ui
+
+    ui.run(config_path)
+    return True
 
 
 def _now_label() -> str:
@@ -349,12 +382,13 @@ def ui_command(ctx: typer.Context) -> None:
     save files.
     """
     config_path = ctx.obj.get("config_path")
-    if not sys.stdout.isatty():
-        console.print(
-            "[red]'gsg ui' needs an interactive terminal. "
-            "Use 'gsg status' / 'gsg versions' when piping output.[/red]"
-        )
-        raise typer.Exit(1)
+    # Asked for explicitly, so failures are errors here — unlike a bare `gsg`,
+    # which quietly falls back to help.
+    #
+    # The import is checked BEFORE the terminal check so the two failures are
+    # distinguishable from a non-interactive shell. That is what lets the
+    # packaging CI assert that Textual really is inside the frozen exe: a
+    # bundle missing it reports the dependency, not the terminal.
     try:
         from . import ui
     except ImportError as exc:
@@ -363,6 +397,12 @@ def ui_command(ctx: typer.Context) -> None:
             "[dim]Install it with: pip install textual[/dim]"
         )
         raise typer.Exit(1) from exc
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        console.print(
+            "[red]'gsg ui' needs an interactive terminal. "
+            "Use 'gsg status' / 'gsg versions' when piping output.[/red]"
+        )
+        raise typer.Exit(1)
     ui.run(config_path)
 
 
