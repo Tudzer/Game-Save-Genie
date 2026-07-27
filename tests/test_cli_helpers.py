@@ -31,7 +31,11 @@ def test_bare_gsg_opens_the_dashboard_when_configured(
     assert isinstance(monkeypatch, pytest.MonkeyPatch)
     opened: list[object] = []
     monkeypatch.setattr("game_save_genie.cli._dashboard_available", lambda: True)
-    monkeypatch.setattr("game_save_genie.ui.run", opened.append)
+    def fake_run(cfg: object) -> bool:
+        opened.append(cfg)
+        return True  # ui.run reports whether the dashboard exited cleanly
+
+    monkeypatch.setattr("game_save_genie.ui.run", fake_run)
 
     cfg = str(tmp_path / "c.yaml")
     runner.invoke(
@@ -65,6 +69,51 @@ def test_bare_gsg_falls_back_to_help_without_textual(
     assert "Commands" in result.output
 
 
+def test_a_crashed_dashboard_falls_back_to_help(tmp_path: Path, monkeypatch: object) -> None:
+    """Textual swallows exceptions raised after its loop starts, so `run()`
+    returns normally on a crash. Reporting that as success would exit 0 on a
+    screen full of traceback and skip the fallback entirely."""
+    import pytest
+
+    assert isinstance(monkeypatch, pytest.MonkeyPatch)
+    monkeypatch.setattr("game_save_genie.cli._dashboard_available", lambda: True)
+    monkeypatch.setattr("game_save_genie.ui.run", lambda cfg: False)
+
+    cfg = str(tmp_path / "c.yaml")
+    runner.invoke(
+        app,
+        ["--config", cfg, "config", "--cloud-provider", "google_drive",
+         "--rclone-remote", "gdrive"],
+    )
+    result = runner.invoke(app, ["--config", cfg])
+    assert "Commands" in result.output
+
+
+def test_a_declined_wizard_is_not_buried_by_the_dashboard(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """A failed or declined setup used to fall straight through to the
+    full-screen dashboard, hiding the reason nothing is being backed up."""
+    import pytest
+
+    assert isinstance(monkeypatch, pytest.MonkeyPatch)
+    opened: list[object] = []
+
+    def fake_run(cfg: object) -> bool:
+        opened.append(cfg)
+        return True
+
+    monkeypatch.setattr("game_save_genie.cli._run_setup_wizard", lambda ctx: False)
+    monkeypatch.setattr("game_save_genie.cli._is_interactive", lambda: True)
+    monkeypatch.setattr("game_save_genie.cli._dashboard_available", lambda: True)
+    monkeypatch.setattr("game_save_genie.ui.run", fake_run)
+
+    result = runner.invoke(app, ["--config", str(tmp_path / "c.yaml")])
+    assert result.exit_code == 0, result.output
+    assert "not set up" in result.output
+    assert opened == [], "the dashboard covered the wizard's explanation"
+
+
 def test_help_flag_never_opens_the_dashboard(tmp_path: Path, monkeypatch: object) -> None:
     """`gsg --help` must always be help, even on a configured tty."""
     import pytest
@@ -72,7 +121,11 @@ def test_help_flag_never_opens_the_dashboard(tmp_path: Path, monkeypatch: object
     assert isinstance(monkeypatch, pytest.MonkeyPatch)
     opened: list[object] = []
     monkeypatch.setattr("game_save_genie.cli._dashboard_available", lambda: True)
-    monkeypatch.setattr("game_save_genie.ui.run", opened.append)
+    def fake_run(cfg: object) -> bool:
+        opened.append(cfg)
+        return True  # ui.run reports whether the dashboard exited cleanly
+
+    monkeypatch.setattr("game_save_genie.ui.run", fake_run)
 
     result = runner.invoke(app, ["--config", str(tmp_path / "c.yaml"), "--help"])
     assert result.exit_code == 0

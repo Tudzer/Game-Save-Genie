@@ -27,6 +27,8 @@ Three rules this module holds to:
 from __future__ import annotations
 
 import io
+import logging
+import threading
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +44,8 @@ from textual.widgets import DataTable, Footer, Header, RichLog, Static
 from .config import get_data_dir, load_config, load_games
 from .database import Database
 from .models import Game, SaveVersion
+
+logger = logging.getLogger(__name__)
 
 LOCAL = "local"
 CLOUD = "cloud"
@@ -130,6 +134,7 @@ class GameSaveGenieApp(App[None]):
         # another's name.
         self._cloud_token = 0
         self._debounce: Timer | None = None
+        self._stdout_lock = threading.Lock()
 
     # ---------------------------------------------------------------- layout
 
@@ -181,11 +186,25 @@ class GameSaveGenieApp(App[None]):
         # `gsg ui` command, so a module-level import here would be a cycle.
         from .cli import _cloud_target
 
-        config = load_config(self.config_path)
-        self.games = load_games(self.config_path)
-        db = Database(get_data_dir() / "versions.db")
-
         table = self.query_one("#games", DataTable)
+        # Refresh runs after every job, so losing the cursor would silently
+        # move the selection to the first game — and the next `r` would target
+        # a game the user never chose.
+        previous_id = None
+        if self.games and 0 <= table.cursor_row < len(self.games):
+            previous_id = self.games[table.cursor_row].id
+
+        try:
+            config = load_config(self.config_path)
+            self.games = load_games(self.config_path)
+            db = Database(get_data_dir() / "versions.db")
+        except Exception as exc:
+            # A hand-edited games.yaml or a locked database must be a red line
+            # in the Activity pane, not the end of the application.
+            logger.exception("Could not load games")
+            self.log_line(f"[red]Could not load your games: {exc}[/red]")
+            return
+
         table.clear()
         for game in self.games:
             versions = [v for v in db.get_versions(game.id) if v.origin != "safety"]
@@ -200,8 +219,22 @@ class GameSaveGenieApp(App[None]):
         table.border_title = f"Games ({len(self.games)})"
 
         if not self.games:
-            self._render_versions(placeholder="No games tracked. Run 'gsg scan', then 'gsg add'.")
+            table.add_row("[dim]No games tracked yet.[/dim]", "", "", "")
+            self.rows = []
+            if self._debounce is not None:
+                self._debounce.stop()
+                self._debounce = None
+            self._set_versions_title(None, self.source)
+            self._render_versions(
+                placeholder="Run 'gsg scan' to find your games, then 'gsg add <title>'."
+            )
             return
+
+        if previous_id is not None:
+            for index, game in enumerate(self.games):
+                if game.id == previous_id:
+                    table.move_cursor(row=index)
+                    break
         self.load_versions()
 
     @on(DataTable.RowHighlighted, "#games")
@@ -290,9 +323,15 @@ class GameSaveGenieApp(App[None]):
 
         The CLI helpers write to a Rich console bound to stdout. Left alone
         that output would be painted straight over the TUI.
+
+        Serialised because ``redirect_stdout`` swaps a process-global. Two
+        workers overlapping (a cloud listing during a backup — they are in
+        different worker groups, so they can) would restore each other's
+        buffer and leave sys.stdout pointing at a dead StringIO for the rest
+        of the session, silently swallowing everything after it.
         """
         buffer = io.StringIO()
-        with redirect_stdout(buffer):
+        with self._stdout_lock, redirect_stdout(buffer):
             result = work_fn()
         return result, buffer.getvalue().strip()
 
@@ -305,27 +344,32 @@ class GameSaveGenieApp(App[None]):
         if refresh:
             self.action_refresh()
 
-    @work(thread=True, exclusive=True, group="cloud")
+    @work(thread=True, exclusive=True, group="cloud", exit_on_error=False)
     def _load_cloud_versions(self, game: Game, token: int) -> None:
         from .cli import _cloud_target, _effective_remote
         from .cloud import get_rclone_path, list_remote_version_entries
 
-        config = load_config(self.config_path)
-        remote = _effective_remote(game, config)
-        if not _cloud_target(game, config) or not remote:
-            self.call_from_thread(
-                self._set_cloud_rows, token, [], "No cloud configured for this game."
-            )
-            return
         try:
+            config = load_config(self.config_path)
+            remote = _effective_remote(game, config)
+            if not _cloud_target(game, config) or not remote:
+                self.call_from_thread(
+                    self._set_cloud_rows, token, [], "No cloud configured for this game."
+                )
+                return
             (entries, _out) = self._capture(
                 lambda: list_remote_version_entries(
+                    # This can DOWNLOAD rclone on a fresh install, so it raises
+                    # far more than RuntimeError: ConnectionError, OSError,
+                    # PermissionError. Catching only RuntimeError tore the whole
+                    # dashboard down over an offline machine.
                     get_rclone_path(self.config_path), game, remote, config.remote_root
                 )
             )
-        except RuntimeError as exc:
+        except Exception as exc:
             # Errors DO belong in the activity log — unlike routine listings,
             # which used to log a line per keypress and drowned everything.
+            logger.exception("Cloud listing failed for %s", game.title)
             self.call_from_thread(self.log_line, f"[red]Cloud listing failed: {exc}[/red]")
             self.call_from_thread(
                 self._set_cloud_rows, token, [], "Could not reach the cloud (see Activity)."
@@ -356,16 +400,19 @@ class GameSaveGenieApp(App[None]):
         self.rows = rows
         self._render_versions(placeholder=None if rows else empty_note)
 
-    @work(thread=True, exclusive=True, group="job")
+    @work(thread=True, exclusive=True, group="job", exit_on_error=False)
     def _run_backup_job(self, game: Game) -> None:
         from .cli import _cloud_upload, _run_backup
         from .ludusavi import get_ludusavi_path
 
-        config = load_config(self.config_path)
-        db = Database(get_data_dir() / "versions.db")
-        ludusavi = None if game.custom else get_ludusavi_path(self.config_path)
-
         def job() -> tuple[bool, str]:
+            # Resolved inside the try below, not above it: get_ludusavi_path
+            # downloads the binary on a fresh install and raises on an offline
+            # or proxied machine. Outside the guard that killed the app with a
+            # traceback and left _busy stuck True.
+            config = load_config(self.config_path)
+            db = Database(get_data_dir() / "versions.db")
+            ludusavi = None if game.custom else get_ludusavi_path(self.config_path)
             result = _run_backup(game, config, db, ludusavi, label="Backup from gsg ui")
             if not result.success:
                 return False, f"[red]{result.message}[/red]"
@@ -384,16 +431,15 @@ class GameSaveGenieApp(App[None]):
         _ok, message = outcome
         self.call_from_thread(self._finish, message, output, True)
 
-    @work(thread=True, exclusive=True, group="job")
+    @work(thread=True, exclusive=True, group="job", exit_on_error=False)
     def _run_restore_job(self, game: Game, row: VersionRow) -> None:
         from .cli import _apply_cloud_version, restore_local_version
         from .cloud import get_rclone_path
         from .ludusavi import get_ludusavi_path
 
-        config = load_config(self.config_path)
-        db = Database(get_data_dir() / "versions.db")
-
         def job() -> tuple[bool, str]:
+            config = load_config(self.config_path)
+            db = Database(get_data_dir() / "versions.db")
             if row.local is not None:
                 return restore_local_version(
                     game, row.local, config, db, self.config_path, no_safety=False
@@ -434,7 +480,10 @@ class GameSaveGenieApp(App[None]):
     def action_restore(self) -> None:
         self._confirm_restore()
 
-    @work
+    # exclusive: holding `r` down would otherwise stack two identical confirm
+    # dialogs, and answering both starts two restores sharing one staging
+    # directory — one wipes the other mid-extract.
+    @work(exclusive=True, group="confirm")
     async def _confirm_restore(self) -> None:
         game = self._selected_game()
         row = self._selected_row()
@@ -459,6 +508,10 @@ class GameSaveGenieApp(App[None]):
         if not confirmed:
             self.log_line("[dim]Restore cancelled — nothing changed.[/dim]")
             return
+        # Re-check: the gate above was evaluated before the dialog awaited, so
+        # a backup may have started while it was open.
+        if self._reject_if_busy():
+            return
         self._busy = True
         self.log_line(f"[cyan]Restoring {game.title} from {row.version_id}…[/cyan]")
         self._run_restore_job(game, row)
@@ -479,6 +532,14 @@ def _format_version_id(version_id: str) -> str:
     return f"{date[:4]}-{date[4:6]}-{date[6:]} {clock[:2]}:{clock[2:4]}"
 
 
-def run(config_path: Path | None = None) -> None:
-    """Launch the dashboard."""
-    GameSaveGenieApp(config_path=config_path).run()
+def run(config_path: Path | None = None) -> bool:
+    """Launch the dashboard. False if it ended on an unhandled error.
+
+    Textual catches exceptions raised once its message loop is up: it renders
+    a traceback and sets return_code, but ``App.run()`` still returns
+    normally. Reporting that as success would exit 0 on a screen full of
+    traceback and skip the caller's fallback.
+    """
+    app = GameSaveGenieApp(config_path=config_path)
+    app.run()
+    return app.return_code in (0, None)
