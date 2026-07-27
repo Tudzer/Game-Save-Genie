@@ -25,6 +25,7 @@
 /* Self-contained on purpose: no fonts, analytics, or assets from anywhere
    else. The product has no telemetry; its website shouldn't either. */
 :root {
+  color-scheme: dark;
   --bg: #0d1017;
   --bg-raised: #151a24;
   --bg-sunken: #090b10;
@@ -56,6 +57,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: #9dbaff; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.skip {
+  position: absolute; left: -9999px; top: 0; z-index: 10;
+  background: var(--bg-raised); color: var(--text);
+  padding: .7rem 1.1rem; border: 1px solid var(--line); border-radius: 0 0 8px 0;
+}
+.skip:focus { left: 0; }
 
 /* The browser default focus ring is close to invisible on this background,
    which makes the whole page unusable by keyboard. */
@@ -110,17 +121,29 @@ section:first-of-type { border-top: 0; }
   border: 1px solid transparent; transition: transform .12s ease, filter .12s ease;
 }
 .btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
-.btn-primary { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; }
+/* Its own darker blue rather than --brand-2: white at 15.4px/600 is not WCAG
+   "large text", so it needs the full 4.5:1, and #4a80f0 gives only 3.73:1.
+   #3a66cc keeps the whole gradient above 5:1. */
+.btn-primary { background: linear-gradient(135deg, var(--brand), #3a66cc); color: #fff; }
 .btn-ghost { border-color: var(--line); background: var(--bg-raised); color: var(--text); }
 .cta-note { color: var(--dim); font-size: .85rem; margin-top: .9rem; }
 
 /* ---- screenshot ---- */
 .shot {
+  /* width:100% is load-bearing. .shot is a flex item of a column flex
+     container with align-items:center, so without it the box resolves to
+     fit-content — which the img's min-width pushes to ~700px, and the whole
+     PAGE scrolls sideways on a phone instead of just this container. */
+  width: 100%;
   margin-top: 3rem; border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--bg-sunken); padding: .6rem; overflow-x: auto;
   box-shadow: 0 24px 60px -30px rgba(0,0,0,.9);
 }
-.shot img { display: block; width: 100%; min-width: 680px; border-radius: 8px; }
+.shot img {
+  display: block; width: 100%; min-width: 680px; border-radius: 8px;
+  /* Matches the SVG's aspect ratio so nothing below jumps as it loads. */
+  aspect-ratio: 1287 / 684.4; height: auto;
+}
 .shot-caption { color: var(--dim); font-size: .85rem; text-align: center; margin-top: .85rem; }
 
 /* ---- generic grid ---- */
@@ -140,7 +163,7 @@ section:first-of-type { border-top: 0; }
   counter-increment: step; content: counter(step);
   display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: .8rem;
   border-radius: 9px; font: 700 .9rem var(--mono);
-  background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff;
+  background: linear-gradient(135deg, var(--brand), #3a66cc); color: #fff;
 }
 .step h3 { font-size: 1rem; }
 .step p { color: var(--muted); font-size: .93rem; margin: 0; }
@@ -207,6 +230,8 @@ footer a { color: var(--muted); }
 </head>
 <body>
 
+<a class="skip" href="#why">Skip to content</a>
+
 <header class="hero">
   <div class="wrap hero-inner">
     <img class="mark" src="assets/icon.png" alt="Game Save Genie logo: a magic lamp">
@@ -244,6 +269,8 @@ footer a { color: var(--muted); }
   </div>
 </header>
 
+<main>
+
 <section id="why">
   <div class="wrap">
     <p class="eyebrow">The problem</p>
@@ -274,7 +301,8 @@ footer a { color: var(--muted); }
       <div class="step">
         <h3>Connect your cloud</h3>
         <p>Run <code>gsg</code>. Google Drive and OneDrive open a browser — sign in, click
-           Allow. Or point it at any S3 bucket, or your own server.</p>
+           Allow. For any S3 bucket or your own server, run <code>gsg setup-s3</code>
+           instead.</p>
       </div>
       <div class="step">
         <h3>Play</h3>
@@ -291,32 +319,33 @@ footer a { color: var(--muted); }
     <h2>Built to be boring, in the good way</h2>
     <div class="grid">
       <div class="card">
-        <h3><span class="ico">🕹️</span> Knows your games</h3>
+        <h3><span class="ico" aria-hidden="true">🕹️</span> Knows your games</h3>
         <p>Save locations for 19,000+ titles via the open-source Ludusavi database, plus
            process watching so it knows when you're actually playing.</p>
       </div>
       <div class="card">
-        <h3><span class="ico">🎮</span> Emulators too</h3>
+        <h3><span class="ico" aria-hidden="true">🎮</span> Emulators too</h3>
         <p><code>gsg add --path</code> backs up any folder — RetroArch, PCSX2, Dolphin,
            memory cards, save states — so games Ludusavi doesn't know are covered.</p>
       </div>
       <div class="card">
-        <h3><span class="ico">🕰️</span> Every session is a version</h3>
-        <p>Immutable, checksummed snapshots. Roll back to any point, not just to
-           “last backup”.</p>
+        <h3><span class="ico" aria-hidden="true">🕰️</span> Every session is a version</h3>
+        <p>Immutable, checksummed snapshots — roll back to any recent session, not just to
+           “last backup”. The last 10 are kept by default; raise it with
+           <code>max_versions</code>.</p>
       </div>
       <div class="card">
-        <h3><span class="ico">☁️</span> Your own cloud</h3>
+        <h3><span class="ico" aria-hidden="true">☁️</span> Your own cloud</h3>
         <p>Google Drive, OneDrive, any S3 bucket, or anything rclone speaks. Delta uploads
            mean an unchanged 40 MB save is never re-sent.</p>
       </div>
       <div class="card">
-        <h3><span class="ico">🖥️</span> Follows you between PCs</h3>
+        <h3><span class="ico" aria-hidden="true">🖥️</span> Follows you between PCs</h3>
         <p>Restore on any machine, with paths remapped automatically when a save was
            recorded under a different Windows username.</p>
       </div>
       <div class="card">
-        <h3><span class="ico">🔔</span> Tells you when it breaks</h3>
+        <h3><span class="ico" aria-hidden="true">🔔</span> Tells you when it breaks</h3>
         <p>A tray icon shows at a glance whether your saves are safe, and goes red with a
            notification if a backup or upload fails.</p>
       </div>
@@ -348,17 +377,18 @@ footer a { color: var(--muted); }
     <h2>How it compares</h2>
     <div class="table-scroll">
       <table>
+        <caption class="sr-only">Game Save Genie compared with Ludusavi, Game Backup Monitor and Hydra Cloud</caption>
         <thead>
-          <tr><th>&nbsp;</th><th>Game Save Genie</th><th>Ludusavi</th><th>Game Backup Monitor</th><th>Hydra Cloud</th></tr>
+          <tr><td></td><th scope="col">Game Save Genie</th><th scope="col">Ludusavi</th><th scope="col">Game Backup Monitor</th><th scope="col">Hydra Cloud</th></tr>
         </thead>
         <tbody>
-          <tr><td>Auto-backup on game close</td><td class="y">Yes</td><td class="n">No</td><td class="y">Yes</td><td class="y">Yes</td></tr>
-          <tr><td>Periodic backup during play</td><td class="y">Yes</td><td class="n">No</td><td class="y">Yes</td><td class="n">No</td></tr>
-          <tr><td>Direct cloud upload, delta</td><td class="y">Yes</td><td class="y">Yes</td><td class="p">Needs a sync folder</td><td class="p">Their servers</td></tr>
-          <tr><td>Cross-machine path remapping</td><td class="y">Yes</td><td class="n">No</td><td class="n">No</td><td class="y">Yes</td></tr>
-          <tr><td>Version history</td><td class="y">Per session</td><td class="y">Yes</td><td class="y">Yes</td><td class="p">2 per game</td></tr>
-          <tr><td>Storage you own</td><td class="y">Yes</td><td class="y">Yes</td><td class="p">Sync folder</td><td class="n">Their servers</td></tr>
-          <tr><td>Free</td><td class="y">Yes</td><td class="y">Yes</td><td class="y">Yes</td><td class="n">Subscription</td></tr>
+          <tr><th scope="row">Auto-backup on game close</th><td class="y">Yes</td><td class="n">No</td><td class="y">Yes</td><td class="y">Yes</td></tr>
+          <tr><th scope="row">Periodic backup during play</th><td class="y">Yes</td><td class="n">No</td><td class="y">Yes</td><td class="n">No</td></tr>
+          <tr><th scope="row">Direct cloud upload, delta</th><td class="y">Yes</td><td class="y">Yes</td><td class="p">Needs a sync folder</td><td class="p">Their servers</td></tr>
+          <tr><th scope="row">Cross-machine path remapping</th><td class="y">Yes</td><td class="n">No</td><td class="n">No</td><td class="y">Yes</td></tr>
+          <tr><th scope="row">Version history</th><td class="y">Per session, 10 kept</td><td class="y">Yes</td><td class="y">Yes</td><td class="p">2 per game</td></tr>
+          <tr><th scope="row">Storage you own</th><td class="y">Yes</td><td class="y">Yes</td><td class="p">Sync folder</td><td class="n">Their servers</td></tr>
+          <tr><th scope="row">Free</th><td class="y">Yes</td><td class="y">Yes</td><td class="y">Yes</td><td class="n">Subscription</td></tr>
         </tbody>
       </table>
     </div>
@@ -426,15 +456,22 @@ gsg pull --all       <span class="cmt"># catch this machine up from the cloud</s
 
     <details>
       <summary>Where do my saves actually live?</summary>
-      <p>In your own cloud storage, as ordinary files you can open with anything. No
-         accounts, no servers of ours, no telemetry — <code>gsg</code> only ever talks to
+      <p>In storage you own. On your PC, every version is a plain zip of a Ludusavi backup
+         tree you can open with anything. In the cloud they're stored de-duplicated — each
+         file's contents once under its SHA-256, plus a readable JSON manifest per version —
+         which is how an unchanged 40&nbsp;MB save avoids being re-uploaded.</p>
+      <p>No accounts, no servers of ours, no telemetry: <code>gsg</code> only ever talks to
          the remote you configured and to GitHub, to download Ludusavi and rclone.</p>
     </details>
 
     <details>
       <summary>What happens if I stop using it?</summary>
-      <p>Your saves are still sitting in your Drive or bucket. Nothing expires and nothing
-         is locked in — Ludusavi can restore its own backup format directly.</p>
+      <p>Nothing expires and there's no subscription to lapse. Your local snapshots are
+         plain zips of a Ludusavi backup tree, so Ludusavi can restore them directly without
+         <code>gsg</code> involved at all.</p>
+      <p>The cloud copy is content-addressed, so rebuilding it by hand means following a
+         manifest — plain JSON listing each file's path and hash. It's MIT-licensed and runs
+         on your own storage, so there's no vendor here to cut you off.</p>
     </details>
 
     <details>
@@ -459,6 +496,8 @@ gsg pull --all       <span class="cmt"># catch this machine up from the cloud</s
     </details>
   </div>
 </section>
+
+</main>
 
 <footer>
   <div class="wrap foot-row">

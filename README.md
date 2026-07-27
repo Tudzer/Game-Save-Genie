@@ -116,19 +116,19 @@ The trust rules that make this safe:
 | `backup_dir` | `<data>/backups` | Local backup root |
 | `ludusavi_path` / `rclone_path` | auto-download | Bring your own binaries |
 
-Cloud layout: `<remote>:<remote_root>/<game-id>/<version-id>.zip` — one compressed, checksummed object per play session.
+Cloud layout: each save file is stored once under its SHA-256 at `<remote>:<remote_root>/<game-id>/blobs/<hh>/<hash>`, and each version is a small JSON manifest at `<game-id>/manifests/<version-id>.json` listing that version's files. The manifest is uploaded last, so a version only becomes visible once all its data is there. That is what makes uploads incremental — an unchanged file is never re-sent. (Pre-0.3.0 versions are single zips and are still readable.)
 
 ## FAQ
 
 **Is this safe for my saves?** That's the whole design brief. Every restore is preceded by a verified download *and* a safety backup of your current state; any failure aborts cleanly rather than half-applying. The restore pipeline was built failure-first — see [CHANGELOG](CHANGELOG.md).
 
-**Where do my saves live?** In your own cloud storage, as plain zip files you can open with anything. No accounts, no servers of ours, no telemetry — `gsg` only ever talks to your configured remote and GitHub (to download the Ludusavi/rclone binaries).
+**Where do my saves live?** In storage you own. Locally, each version is a plain zip of a Ludusavi backup tree that you can open with anything. In the cloud they are stored de-duplicated — file contents under their SHA-256, plus a readable JSON manifest per version — which is what keeps uploads incremental. No accounts, no servers of ours, no telemetry: `gsg` only ever talks to your configured remote and GitHub (to download the Ludusavi/rclone binaries).
 
-**What if I stop using it?** Your saves are still sitting in your Drive/bucket as ordinary zips, and Ludusavi can restore its own backup format directly. No lock-in, nothing expires.
+**What if I stop using it?** Nothing expires and there is no subscription to lapse. Your local snapshots are plain zips of a Ludusavi backup tree, which Ludusavi can restore directly without `gsg`. The cloud copy is content-addressed, so rebuilding it by hand means following a manifest — plain JSON listing each file's path and hash. `gsg` is MIT-licensed and self-hosted, so there is no vendor to be cut off by.
 
 **Linux / Steam Deck?** Beta, and testers are gold. The full pipeline runs on Linux: backup/restore/`pull` (with Wine-prefix handling), the process watcher, `notify-send` notifications, Steam detection (native/Deck/Flatpak paths), and `gsg auto --install` sets up a systemd user service (headless boxes: `loginctl enable-linger $USER`). What it needs now is real-world mileage — [file an issue](https://github.com/Vasanthdev2004/Game-Save-Genie/issues) with anything you hit; see [CONTRIBUTING](CONTRIBUTING.md).
 
-**Emulator saves? Games Ludusavi doesn't know?** Planned: `gsg add --path` for arbitrary directories with a RetroArch preset. Watch the repo.
+**Emulator saves? Games Ludusavi doesn't know?** Covered since 0.4.0 — `gsg add --path` backs up any folder or file (RetroArch, PCSX2, Dolphin, memory cards, save states). Repeat `--path` as needed.
 
 ## Project structure
 
