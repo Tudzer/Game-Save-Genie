@@ -121,6 +121,53 @@ def _cloud_configured(config_path: Path | None) -> bool:
     return bool(config.rclone_remote_name and config.cloud_provider)
 
 
+# --- Cloud resolution -------------------------------------------------------
+# A game's cloud settings are an *override* of the global config, never a
+# separate source of truth. Every caller must agree on how they combine, or
+# the same game ends up cloud-enabled for one command and invisible to
+# another (uploads that can never be pulled back down, purges that miss).
+
+
+def _effective_provider(game: Game, config: SyncConfig) -> CloudProvider | None:
+    """The provider actually in force for this game: per-game, else global."""
+    return game.cloud_provider or config.cloud_provider
+
+
+def _effective_remote(game: Game, config: SyncConfig) -> str | None:
+    """The rclone remote *name* actually in force for this game."""
+    return game.remote_path or config.rclone_remote_name
+
+
+def _cloud_target(game: Game, config: SyncConfig) -> str | None:
+    """Where this game's saves really go (``remote:root``), or None if nowhere.
+
+    Derived on every call so it cannot drift from the config the way a stored
+    label does — `game.cloud_provider` is only ever a hint, never a destination.
+    """
+    remote = _effective_remote(game, config)
+    if not _effective_provider(game, config) or not remote:
+        return None
+    return f"{remote}:{config.remote_root}"
+
+
+def _sync_display(version: SaveVersion, game: Game, config: SyncConfig) -> str:
+    """How a version's cloud state should read *today*.
+
+    ``cloud_synced`` is only ever set, never cleared, so after a provider
+    switch every old row still claims "yes" while the configured remote holds
+    nothing. Compare the remote it was uploaded to against the one in force.
+    """
+    if not version.cloud_synced:
+        return "pending"
+    remote = _effective_remote(game, config)
+    stored = version.cloud_remote_path or ""
+    if remote and ":" in stored:
+        uploaded_to = stored.split(":", 1)[0]
+        if uploaded_to != remote:
+            return f"stale ({uploaded_to})"
+    return "yes"
+
+
 @app.command()
 def init(
     ctx: typer.Context,
@@ -267,6 +314,7 @@ def add(
 def list_games(ctx: typer.Context) -> None:
     """List tracked games."""
     config_path = ctx.obj.get("config_path")
+    config = load_config(config_path)
     games = load_games(config_path)
     if not games:
         console.print("[yellow]No games tracked.[/yellow]")
@@ -277,7 +325,7 @@ def list_games(ctx: typer.Context) -> None:
     table.add_column("Title")
     table.add_column("Platform")
     table.add_column("Auto Sync")
-    table.add_column("Cloud")
+    table.add_column("Cloud Target")
 
     for game in games:
         table.add_row(
@@ -285,7 +333,7 @@ def list_games(ctx: typer.Context) -> None:
             game.title,
             game.platform.value,
             "yes" if game.auto_sync else "no",
-            game.cloud_provider.value if game.cloud_provider else "none",
+            _cloud_target(game, config) or "off",
         )
     console.print(table)
 
@@ -304,6 +352,31 @@ def remove(
         console.print(f"[red]Game '{game_id}' not found.[/red]")
         raise typer.Exit(1)
 
+    config = load_config(config_path)
+    remote_name = _effective_remote(game, config)
+
+    if purge:
+        # Confirm before untracking, while the game's own settings still
+        # resolve — and name the exact remote path, because this deletes the
+        # only remaining copy of every save for this game.
+        targets = [
+            str(config.backup_dir / game_id),
+            str(config.backup_dir / "_versions" / game_id),
+        ]
+        if remote_name:
+            targets.append(_remote_path(remote_name, config.remote_root, game_id))
+        console.print(f"[red]--purge will permanently delete every save for {game.title}:[/red]")
+        for target in targets:
+            console.print(f"  {target}")
+        if not remote_name:
+            console.print(
+                "  [yellow](no rclone remote configured — cloud copies, if any, will remain)"
+                "[/yellow]"
+            )
+        if sys.stdin.isatty() and not typer.confirm("Delete these permanently?"):
+            console.print("[yellow]Cancelled — nothing was removed.[/yellow]")
+            raise typer.Exit(1)
+
     games = [g for g in games if g.id != game_id]
     save_games(games, config_path)
     console.print(f"[green]Removed: {game.title} ({game_id})[/green]")
@@ -312,7 +385,6 @@ def remove(
         # Delete local backups (live backup dir + per-version snapshots)
         import shutil
 
-        config = load_config(config_path)
         for local_dir in (
             config.backup_dir / game_id,
             config.backup_dir / "_versions" / game_id,
@@ -321,15 +393,38 @@ def remove(
                 shutil.rmtree(local_dir, ignore_errors=True)
                 console.print(f"  [dim]Deleted local backups: {local_dir}[/dim]")
 
-        # Delete cloud saves
-        if game.cloud_provider and config.rclone_remote_name:
+        # Forget this game's rows too, or re-adding the same title resurrects
+        # version history pointing at snapshots that were just deleted.
+        db = Database(get_data_dir() / "versions.db")
+        db.delete_game(game_id)
+
+        # Delete cloud saves. Resolve the remote the same way uploads do —
+        # using the global remote here would purge a *different* remote than
+        # the one this game's saves were actually written to.
+        if not remote_name:
+            console.print(
+                "  [yellow]No rclone remote configured — cloud saves (if any) were NOT "
+                "deleted.[/yellow]"
+            )
+        else:
+            remote = _remote_path(remote_name, config.remote_root, game_id)
             try:
                 rclone_path = get_rclone_path(config_path)
-                remote = _remote_path(config.rclone_remote_name, config.remote_root, game_id)
-                run_rclone(rclone_path, ["purge", remote], check=False)
-                console.print(f"  [dim]Deleted cloud saves: {remote}[/dim]")
-            except RuntimeError:
-                pass
+                result = run_rclone(rclone_path, ["purge", remote], check=False)
+                if result.returncode == 0:
+                    console.print(f"  [dim]Deleted cloud saves: {remote}[/dim]")
+                elif result.returncode == 3:
+                    console.print(f"  [dim]No cloud saves found at {remote}[/dim]")
+                else:
+                    console.print(
+                        f"  [yellow]Could not delete cloud saves at {remote} — they may "
+                        f"still exist:[/yellow] {(result.stderr or '').strip()}"
+                    )
+            except RuntimeError as exc:
+                console.print(
+                    f"  [yellow]rclone unavailable — cloud saves at {remote} were NOT "
+                    f"deleted ({exc}).[/yellow]"
+                )
 
 
 @app.command()
@@ -348,30 +443,43 @@ def status(ctx: typer.Context) -> None:
     table.add_column("Game")
     table.add_column("Versions")
     table.add_column("Last Backup")
-    table.add_column("Cloud")
+    table.add_column("Cloud Target")
     table.add_column("Cloud Synced")
 
+    never_backed_up: list[str] = []
     for game in games:
         versions = db.get_versions(game.id)
-        last_backup = "never"
+        last_backup = "[yellow]never[/yellow]"
         cloud_synced = "no"
         # Judge sync status by the newest real backup — safety backups are
         # local-only by design and would otherwise show as forever-pending.
         display = next((v for v in versions if v.origin != "safety"), None)
         if display:
             last_backup = display.created_at.strftime("%Y-%m-%d %H:%M")
-            cloud_synced = "yes" if display.cloud_synced else "pending"
+            cloud_synced = _sync_display(display, game, config)
+        else:
+            never_backed_up.append(game.id)
 
-        cloud_status = game.cloud_provider.value if game.cloud_provider else "none"
         table.add_row(
             game.title,
-            str(len(versions)),
+            # Count real backups only, so this agrees with Last Backup: a game
+            # holding nothing but pre-restore safety snapshots is not "3 versions".
+            str(len([v for v in versions if v.origin != "safety"])),
             last_backup,
-            cloud_status,
+            _cloud_target(game, config) or "off",
             cloud_synced,
         )
 
     console.print(table)
+
+    if never_backed_up:
+        console.print(
+            f"\n[yellow]{len(never_backed_up)} game(s) have never been backed up:[/yellow] "
+            f"{', '.join(never_backed_up)}\n"
+            "[dim]Run 'gsg backup <game-id>' to protect them now. If a game never backs up "
+            "on its own, its process is not being matched — set it with "
+            "'gsg add <title> --exe <name.exe>'.[/dim]"
+        )
 
     # Storage summary
     local_size = sum(
@@ -441,7 +549,10 @@ def backup(
         else:
             color = "green"
         console.print(f"[{color}]{result.message}[/]")
-        if result.success and result.version and not no_cloud and game.cloud_provider:
+        if result.success and result.version and not no_cloud:
+            # No provider gate here: `_cloud_upload` resolves the effective
+            # provider itself, so `gsg backup` uploads exactly what `gsg auto`
+            # would. They used to disagree.
             _cloud_upload(ctx, game, result.version, dry_run=False)
 
 
@@ -536,6 +647,9 @@ def versions(
     game_id: str = typer.Argument(..., help="Game ID"),
 ) -> None:
     """List save versions for a game."""
+    config_path = ctx.obj.get("config_path")
+    config = load_config(config_path)
+    game = next((g for g in load_games(config_path) if g.id == game_id), None)
     db = Database(get_data_dir() / "versions.db")
     versions_list = db.get_versions(game_id)
     if not versions_list:
@@ -557,7 +671,9 @@ def versions(
             _human_size(v.size_bytes),
             str(v.file_count),
             v.source_machine or "unknown",
-            "yes" if v.cloud_synced else "no",
+            # An untracked game (removed, rows left behind) has no cloud
+            # settings to judge against — report the raw flag rather than lie.
+            _sync_display(v, game, config) if game else ("yes" if v.cloud_synced else "no"),
         )
     console.print(table)
 
@@ -572,13 +688,16 @@ def cloud_list(
     config = load_config(config_path)
     games = load_games(config_path)
     game = next((g for g in games if g.id == game_id), None)
-    if not game or not game.cloud_provider:
+    if not game:
+        console.print(f"[red]Game not found: {game_id}[/red]")
+        raise typer.Exit(1)
+    if not _effective_provider(game, config):
         console.print("[red]Game has no cloud provider configured.[/red]")
         raise typer.Exit(1)
 
-    remote_name = game.remote_path or config.rclone_remote_name
+    remote_name = _effective_remote(game, config)
     if not remote_name:
-        console.print("[red]No rclone remote configured. Run 'gsg setup-railway' first.[/red]")
+        console.print("[red]No rclone remote configured. Run 'gsg' to set up cloud storage.[/red]")
         raise typer.Exit(1)
     rclone_path = get_rclone_path(config_path)
     try:
@@ -636,14 +755,10 @@ def pull(
         for g in paused:
             console.print(f"[dim]{g.title}: paused — skipped (pull it by id to override).[/dim]")
         targets = [g for g in targets if g.auto_sync and g.sync_enabled]
-    cloud_targets = [
-        g for g in targets
-        if g.cloud_provider and (g.remote_path or config.rclone_remote_name)
-    ]
+    cloud_targets = [g for g in targets if _cloud_target(g, config)]
     if not cloud_targets:
         console.print(
-            "[red]No cloud-enabled game to pull. Configure cloud storage with 'gsg' "
-            "or set a provider with 'gsg add --cloud'.[/red]"
+            "[red]No cloud-enabled game to pull. Configure cloud storage with 'gsg'.[/red]"
         )
         raise typer.Exit(1)
 
@@ -679,7 +794,7 @@ def pull(
                 skipped_running += 1
                 continue
 
-        remote_name = game.remote_path or config.rclone_remote_name
+        remote_name = _effective_remote(game, config)
         assert remote_name is not None  # filtered above
         cloud_latest: str | None = None
         if not (version_id and force):
@@ -765,7 +880,7 @@ def watch(ctx: typer.Context) -> None:
             label=f"Auto-backup on {_now_label()}", origin="auto",
         )
         console.print(f"{'[green]' if result.success else '[red]'}{result.message}[/]")
-        if result.success and result.version and game.cloud_provider:
+        if result.success and result.version:
             _cloud_upload(ctx, game, result.version, dry_run=False)
 
     watcher = GameWatcher(games)
@@ -1733,11 +1848,10 @@ def _cloud_upload(
 ) -> None:
     config_path = ctx.obj.get("config_path")
     config = load_config(config_path)
-    provider = game.cloud_provider or config.cloud_provider
-    if not provider:
+    if not _effective_provider(game, config):
         return
     rclone_path = get_rclone_path(config_path)
-    remote_name = game.remote_path or config.rclone_remote_name
+    remote_name = _effective_remote(game, config)
     if not remote_name:
         console.print("[red]No rclone remote configured.[/red]")
         return
@@ -1805,9 +1919,9 @@ def _cloud_newer_version(
     can never lock the cloud out, and the last applied cloud version (from
     sync_state) counts as local knowledge so the same save is not re-restored.
     """
-    if not game.cloud_provider:
+    if not _effective_provider(game, config):
         return None
-    remote_name = game.remote_path or config.rclone_remote_name
+    remote_name = _effective_remote(game, config)
     if not remote_name:
         return None
     try:
@@ -1858,7 +1972,7 @@ def _apply_cloud_version(
     The applied cloud version is recorded in sync_state so automatic
     restore never re-applies it.
     """
-    remote_name = game.remote_path or config.rclone_remote_name
+    remote_name = _effective_remote(game, config)
     if not remote_name:
         return False
 

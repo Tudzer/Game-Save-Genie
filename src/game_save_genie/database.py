@@ -132,6 +132,20 @@ class Database:
             conn.execute("DELETE FROM save_versions WHERE id = ?", (version_id,))
             conn.commit()
 
+    def delete_game(self, game_id: str) -> int:
+        """Forget every row for a game. Returns the number of versions removed.
+
+        Retention only ever prunes games loaded from games.yaml, so rows left
+        behind by an untracked game are unreachable forever — and re-adding the
+        same title resurrects them, pointing at snapshots that no longer exist.
+        """
+        with self._connection() as conn:
+            cursor = conn.execute("DELETE FROM save_versions WHERE game_id = ?", (game_id,))
+            removed = cursor.rowcount
+            conn.execute("DELETE FROM sync_state WHERE game_id = ?", (game_id,))
+            conn.commit()
+        return int(removed)
+
     def mark_cloud_synced(self, version_id: str, remote_path: str) -> None:
         with self._connection() as conn:
             conn.execute(
