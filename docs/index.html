@@ -92,40 +92,53 @@ img { max-width: 100%; }
 
 /* Motion background, drawn rather than downloaded — no video file, no
    third-party host, nothing to buffer on a phone. */
-.aurora { position: absolute; inset: -30%; z-index: 0; filter: blur(70px); opacity: .75; }
+/* Child selectors, because `.hero > *` below sets z-index 3 at equal
+   specificity and would otherwise win on order — putting both background
+   layers ABOVE the vignette that keeps the headline legible. */
+.hero > .aurora { position: absolute; inset: -30%; z-index: 0; filter: blur(70px); opacity: 1; }
 .aurora span {
   position: absolute; display: block; border-radius: 50%;
   mix-blend-mode: screen; will-change: transform;
 }
 .aurora span:nth-child(1) {
-  width: 52vw; height: 52vw; left: 6%; top: 4%;
-  background: radial-gradient(circle, rgba(108,92,231,.85), transparent 62%);
+  width: 62vw; height: 62vw; left: 2%; top: 12%;
+  background: radial-gradient(circle, rgba(120,96,255,1), transparent 60%);
   animation: drift-a 26s ease-in-out infinite;
 }
 .aurora span:nth-child(2) {
-  width: 46vw; height: 46vw; right: 4%; top: -4%;
-  background: radial-gradient(circle, rgba(74,128,240,.7), transparent 62%);
+  width: 56vw; height: 56vw; right: -2%; top: 0%;
+  background: radial-gradient(circle, rgba(56,132,255,.95), transparent 60%);
   animation: drift-b 32s ease-in-out infinite;
 }
 .aurora span:nth-child(3) {
-  width: 40vw; height: 40vw; left: 34%; bottom: -12%;
-  background: radial-gradient(circle, rgba(255,90,103,.34), transparent 64%);
+  width: 48vw; height: 48vw; left: 30%; bottom: -18%;
+  background: radial-gradient(circle, rgba(255,90,103,.5), transparent 62%);
   animation: drift-c 38s ease-in-out infinite;
 }
-@keyframes drift-a { 50% { transform: translate3d(8%, 6%, 0) scale(1.15); } }
-@keyframes drift-b { 50% { transform: translate3d(-9%, 8%, 0) scale(1.1); } }
-@keyframes drift-c { 50% { transform: translate3d(5%, -7%, 0) scale(1.2); } }
+@keyframes drift-a { 50% { transform: translate3d(14%, -10%, 0) scale(1.25); } }
+@keyframes drift-b { 50% { transform: translate3d(-16%, 14%, 0) scale(1.18); } }
+@keyframes drift-c { 50% { transform: translate3d(10%, -14%, 0) scale(1.3); } }
+
+/* Save data on its way up to the cloud. Squares rather than dots because the
+   product's whole motif is pixels/blocks, and it fills the band between the
+   meta grid and the headline that was otherwise dead space. */
+.hero > .stream { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 
 /* A faint grid over the glow: reads as "tool", not "marketing splash". */
 .hero::after {
-  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
   background-image:
-    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(120% 90% at 50% 30%, #000 30%, transparent 78%);
+    linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+  background-size: 62px 62px;
+  mask-image: radial-gradient(125% 95% at 50% 34%, #000 26%, transparent 76%);
 }
-.hero > * { position: relative; z-index: 2; }
+/* Keeps the headline legible over the brightest part of the glow. */
+.hero::before {
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: linear-gradient(180deg, rgba(5,6,10,.55) 0%, transparent 26%, transparent 52%, rgba(5,6,10,.72) 100%);
+}
+.hero > * { position: relative; z-index: 3; }
 
 /* ── nav ── */
 .nav { display: flex; align-items: center; justify-content: space-between; padding: 1.5rem 0; }
@@ -361,6 +374,7 @@ footer a { color: var(--muted); }
 
 <header class="hero">
   <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+  <canvas class="stream" id="stream" aria-hidden="true"></canvas>
 
   <div class="nav">
     <a class="brand" href="#">
@@ -386,18 +400,14 @@ footer a { color: var(--muted); }
     <div>
       <h2>GAME SAVE<span class="alt">GENIE</span></h2>
       <p class="note">
-        Ludusavi knows where your saves are.<br>
-        rclone knows how to move them.<br>
-        This is the part that notices<br>
-        you stopped playing.
+        Ludusavi knows where your saves are. rclone knows how to move them.
+        This is the part that notices you stopped playing.
       </p>
     </div>
     <div>
       <h2>OPEN<span class="alt">SOURCE</span></h2>
       <p class="note">
-        MIT licensed, no accounts,<br>
-        no servers of ours, and<br>
-        no telemetry of any kind.
+        MIT licensed. No accounts, no servers of ours, no telemetry of any kind.
       </p>
     </div>
     <div>
@@ -749,6 +759,89 @@ gsg pull --all       <span class="cmt"># catch this machine up from the cloud</s
   links.forEach((link) => link.addEventListener('click', () => setOpen(false)));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && menu.dataset.open === 'true') setOpen(false);
+  });
+})();
+
+// Save data rising to the cloud. Blocks, not dots — the product's motif is
+// pixels, and it reads as "files moving" rather than generic sparkles.
+(() => {
+  const canvas = document.getElementById('stream');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  if (!canvas || !canvas.getContext) return;
+
+  const ctx = canvas.getContext('2d', { alpha: true });
+  const TINTS = ['160,150,255', '110,170,255', '230,238,255'];
+  let blocks = [];
+  let w = 0, h = 0, raf = 0, last = 0;
+
+  const rand = (min, max) => min + Math.random() * (max - min);
+
+  const spawn = (seeded) => ({
+    x: rand(0, w),
+    // Seeded blocks start scattered so the field is already full on paint,
+    // instead of everything rising from the bottom edge at once.
+    y: seeded ? rand(0, h) : h + rand(0, 120),
+    size: rand(1.5, 4.5),
+    speed: rand(7, 26),
+    drift: rand(-0.35, 0.35),
+    phase: rand(0, Math.PI * 2),
+    tint: TINTS[(Math.random() * TINTS.length) | 0],
+    alpha: rand(0.18, 0.75),
+  });
+
+  const resize = () => {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const rect = canvas.getBoundingClientRect();
+    w = rect.width; h = rect.height;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Density by area, bounded so a 4K monitor doesn't get thousands.
+    const count = Math.max(28, Math.min(120, Math.round((w * h) / 17000)));
+    blocks = Array.from({ length: count }, () => spawn(true));
+  };
+
+  const draw = (now) => {
+    const dt = Math.min((now - last) / 1000, 0.05);   // clamp after a tab switch
+    last = now;
+    ctx.clearRect(0, 0, w, h);
+    for (const b of blocks) {
+      b.y -= b.speed * dt;
+      b.phase += dt * 0.7;
+      const x = b.x + Math.sin(b.phase) * 14 * b.drift;
+      // Fade out over the top third so nothing pops out of existence.
+      const fade = b.y < h * 0.34 ? Math.max(0, b.y / (h * 0.34)) : 1;
+      ctx.fillStyle = `rgba(${b.tint},${b.alpha * fade})`;
+      ctx.fillRect(x, b.y, b.size, b.size);
+      if (b.y + b.size < 0) Object.assign(b, spawn(false));
+    }
+    raf = requestAnimationFrame(draw);
+  };
+
+  const start = () => {
+    if (raf || reduced.matches) return;
+    last = performance.now();
+    raf = requestAnimationFrame(draw);
+  };
+  const stop = () => { cancelAnimationFrame(raf); raf = 0; };
+
+  const paintStatic = () => {
+    // Reduced motion still gets the texture, just held still.
+    ctx.clearRect(0, 0, w, h);
+    for (const b of blocks) {
+      ctx.fillStyle = `rgba(${b.tint},${b.alpha * 0.6})`;
+      ctx.fillRect(b.x, b.y, b.size, b.size);
+    }
+  };
+
+  const apply = () => { stop(); resize(); reduced.matches ? paintStatic() : start(); };
+
+  apply();
+  addEventListener('resize', apply, { passive: true });
+  reduced.addEventListener('change', apply);
+  // No point animating a background nobody is looking at.
+  document.addEventListener('visibilitychange', () => {
+    document.hidden ? stop() : (reduced.matches || start());
   });
 })();
 </script>
