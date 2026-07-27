@@ -9,11 +9,21 @@ if (-not (Test-Path $python)) { $python = "python" }
 
 & $python -m pip install --upgrade pyinstaller | Out-Null
 
+$icon = "assets\icon.ico"
+if (-not (Test-Path $icon)) {
+    throw "Missing $icon - run: python packaging\make_icon.py"
+}
+
+# The tray glyphs are read at runtime, so they must travel inside the exe.
+# Bundling them under the package directory means tray.asset_path finds them
+# the same way in a bundle as from source (__file__-relative).
 & $python -m PyInstaller `
     --onefile `
     --console `
     --clean `
     --name gsg `
+    --icon $icon `
+    --add-data "src\game_save_genie\assets\tray;game_save_genie/assets/tray" `
     --distpath dist `
     --workpath build `
     --specpath build `
