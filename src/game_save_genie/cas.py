@@ -38,16 +38,15 @@ def build_manifest(
     Paths are stored relative to ``root`` with forward slashes so a manifest
     written on one OS reconstructs correctly on another.
     """
-    files: list[dict[str, Any]] = []
-    for path in sorted(root.rglob("*")):
-        if path.is_file():
-            files.append(
-                {
-                    "path": path.relative_to(root).as_posix(),
-                    "sha256": sha256_file(path),
-                    "size": path.stat().st_size,
-                }
-            )
+    files: list[dict[str, Any]] = [
+        {
+            "path": path.relative_to(root).as_posix(),
+            "sha256": sha256_file(path),
+            "size": path.stat().st_size,
+        }
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    ]
     return {
         "format": MANIFEST_FORMAT,
         "version_id": version_id,

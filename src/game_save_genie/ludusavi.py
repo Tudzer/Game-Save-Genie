@@ -147,10 +147,10 @@ def find_game_saves(binary: Path, game: Game) -> list[GameSavePath]:
         return []
 
     data = _parse_json(result.stdout)
-    paths: list[GameSavePath] = []
-    for entry in data.get("games", {}).get(game.title, {}).get("files", {}).values():
-        paths.append(GameSavePath(path=Path(entry["path"])))
-    return paths
+    return [
+        GameSavePath(path=Path(entry["path"]))
+        for entry in data.get("games", {}).get(game.title, {}).get("files", {}).values()
+    ]
 
 
 def _wine_prefix_args(game: Game) -> list[str]:
@@ -228,6 +228,7 @@ def backup_game(
     size_bytes = sum(int(f.get("bytes", 0)) for f in files_data.values())
 
     from datetime import datetime, timezone
+
     from .config import get_machine_id
 
     version_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
@@ -238,7 +239,8 @@ def backup_game(
         local_path=game_backup_dir,
         size_bytes=size_bytes,
         file_count=file_count,
-        label=label or f"Backup on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        label=label
+        or f"Backup on {datetime.now(timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
         source_machine=get_machine_id(),
         platform=game.platform,
     )

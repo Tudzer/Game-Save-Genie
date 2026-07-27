@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **`gsg list` / `gsg status` now show where saves actually go.** The Cloud column printed a per-game provider label that was stored when the game was added and never updated — so after switching cloud providers it reported the old one (e.g. `s3`) for saves that were sitting safely in the new provider all along. It is now a **Cloud Target** column showing the real destination (`gdrive:game-save-genie`), derived on every render so it cannot go stale.
+- **Cross-machine sync is no longer silently one-way.** A game with no explicit per-game provider was uploaded by `gsg auto` but ignored by the cloud-restore check, so its saves went up and could never come back down. Every command now resolves a game's provider and remote the same way: per-game setting if present, otherwise the global config.
+- **`gsg backup` uploads what `gsg auto` uploads.** The two disagreed about whether a game was cloud-enabled.
+- **`gsg remove --purge` deletes the right thing, and says so honestly.** It resolved the remote from the global config while uploads used the per-game one, so it could purge a *different* remote than the game's saves were written to; it skipped cloud deletion entirely for games without a per-game provider (leaving orphaned data no command could reach); and it printed "Deleted cloud saves" unconditionally because the rclone exit code was discarded. It now targets the game's own remote, reports failures, warns when no remote is configured, and asks for confirmation before deleting.
+- `gsg remove --purge` also clears the game's rows from the version database, so re-adding the same title no longer resurrects history pointing at deleted snapshots.
+- `gsg status` flags games that have never been backed up instead of quietly showing "never", and counts only real backups in the Versions column (safety snapshots were inflating it while Last Backup still read "never").
+- `gsg status` / `gsg versions` mark a version as `stale (<remote>)` when it was uploaded to a remote you no longer use, instead of claiming it is synced.
+
 ## 0.5.0 — 2026-07-20
 
 The launch release: easy install, Linux support, and honest docs.

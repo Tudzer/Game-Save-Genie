@@ -42,8 +42,12 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
     "black>=24.0",
-    "ruff>=0.4.0",
-    "mypy>=1.9.0",
+    # Linters are pinned to a minor series on purpose. Unbounded ranges mean an
+    # upstream release changes what "passing" means and breaks CI on an
+    # unrelated PR — ruff 0.16 widened its default rule set and did exactly
+    # that. Bumping these should be its own commit, with the fixes alongside.
+    "ruff>=0.16,<0.17",
+    "mypy>=2.3,<2.4",
     "types-PyYAML",
     "types-psutil",
 ]
@@ -70,6 +74,39 @@ target-version = ["py310"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# Selected explicitly rather than relying on ruff's defaults, which are not
+# stable across releases. Adding a rule should be a deliberate change with its
+# fixes in the same commit, not something a `pip install` decides for us.
+select = [
+    "E4", "E7", "E9",  # pycodestyle (the subset ruff enables by default)
+    "F",               # pyflakes
+    "I",               # import sorting
+    "UP",              # pyupgrade
+    "B",               # bugbear
+    "SIM",             # simplify
+    "DTZ",             # naive datetimes
+    "PERF",            # obvious performance traps
+    "FURB",            # modernization
+    "PIE",             # misc lints
+    "PLE", "PLW",      # pylint errors + warnings
+    "RUF",             # ruff-specific
+]
+ignore = [
+    # Typer's entire API is `def cmd(x: T = typer.Option(...))`. A function
+    # call in a default argument is the required idiom here, not a bug.
+    "B008",
+    # Per-item try/except inside a loop is deliberate throughout: one
+    # unreadable save file, one dead process handle, or one locked path must
+    # not abort a backup of everything else. The overhead is irrelevant next
+    # to the disk and network work in the same loop.
+    "PERF203",
+    # try/except/pass reads fine and is used in cleanup paths; swapping it for
+    # contextlib.suppress is churn in exactly the code that must not change
+    # behaviour.
+    "SIM105",
+]
 
 [tool.mypy]
 python_version = "3.10"

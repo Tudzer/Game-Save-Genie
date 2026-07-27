@@ -65,8 +65,8 @@ def _read_rclone_config() -> dict[str, dict[str, str]]:
     sections: dict[str, dict[str, str]] = {}
     current: dict[str, str] | None = None
     with config_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
+        for raw_line in f:
+            line = raw_line.strip()
             if line.startswith("[") and line.endswith("]"):
                 name = line[1:-1]
                 current = {}
@@ -706,8 +706,7 @@ def parse_lsf_entries(stdout: str) -> list[tuple[str, str]]:
             continue
         if version_id in (CAS_MANIFEST_DIR, CAS_BLOB_DIR):
             continue  # CAS structure dirs, not versions
-        if version_id.endswith(".zip"):
-            version_id = version_id[:-4]
+        version_id = version_id.removesuffix(".zip")
         if version_id not in seen:
             seen.add(version_id)
             entries.append((version_id, raw))
@@ -756,11 +755,8 @@ def list_remote_version_entries(
         )
 
     # CAS wins over a same-id legacy zip (shouldn't co-occur, but be safe).
-    merged: dict[str, str] = {}
-    for vid, raw in legacy:
-        merged[vid] = raw
-    for vid, raw in cas_entries:
-        merged[vid] = raw
+    merged: dict[str, str] = dict(legacy)
+    merged.update(cas_entries)
     return sorted(merged.items(), key=lambda pair: pair[0])
 
 
@@ -854,7 +850,7 @@ def download_latest_save(
             remote_path="",
         )
 
-    latest = sorted(versions)[-1]
+    latest = max(versions)
     return download_save(
         binary, game, latest, local_dir, remote_name, remote_root,
         dry_run=False, extra_args=extra_args,

@@ -71,7 +71,9 @@ def safe_extract_tar_gz(archive: Path, dest: Path) -> None:
             for member in tf.getmembers():
                 _validate_member_name(member.name, dest)
                 if member.issym() or member.islnk():
-                    raise RuntimeError(f"Unsafe link member in archive: {member.name}")
+                    raise RuntimeError(
+                        f"Unsafe link member in archive: {member.name}"
+                    ) from None
             tf.extractall(dest)
 
 

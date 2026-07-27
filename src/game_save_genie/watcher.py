@@ -222,7 +222,7 @@ class GameWatcher:
         """Run a callback without letting its failure kill the watch loop."""
         try:
             callback(*args)
-        except Exception:  # noqa: BLE001 - the watcher must survive anything
+        except Exception:
             logger.exception("Watcher callback failed")
 
     def _first_process_info(self, pids: set[int]) -> ProcessInfo | None:

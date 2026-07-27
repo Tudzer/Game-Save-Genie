@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from game_save_genie.config import load_config, save_config, save_games, load_games, get_machine_id
-from game_save_genie.models import Game, Platform, CloudProvider
+from game_save_genie.config import get_machine_id, load_config, load_games, save_config, save_games
+from game_save_genie.models import CloudProvider, Game, Platform
 
 
 def test_default_config(tmp_path: Path) -> None:

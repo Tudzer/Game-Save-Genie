@@ -122,6 +122,7 @@ def get_xbox_games() -> set[str]:
             ["powershell", "-Command", "Get-AppxPackage | Select-Object -ExpandProperty Name"],
             capture_output=True,
             text=True,
+            check=False,
             timeout=15,
         )
         if result.returncode != 0:
