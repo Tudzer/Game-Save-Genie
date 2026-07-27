@@ -30,6 +30,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ChangesEnvironment=yes
 UninstallDisplayName=Game Save Genie
 WizardStyle=modern
+; Without these the setup wizard, Add/Remove Programs, and the Start Menu all
+; fall back to a generic icon.
+SetupIconFile=..\assets\icon.ico
+UninstallDisplayIcon={app}\gsg.exe
 
 [Files]
 Source: "..\dist\gsg.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -37,7 +41,8 @@ Source: "..\dist\gsg.exe"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 ; Open a terminal in the install dir so `gsg` is ready to type — a bare
 ; console-exe shortcut would just flash help and close once configured.
-Name: "{userprograms}\Game Save Genie"; Filename: "{cmd}"; Parameters: "/k ""{app}\gsg.exe"""; WorkingDir: "{app}"
+; IconFilename points at the exe so the shortcut shows the lamp, not cmd's icon.
+Name: "{userprograms}\Game Save Genie"; Filename: "{cmd}"; Parameters: "/k ""{app}\gsg.exe"""; WorkingDir: "{app}"; IconFilename: "{app}\gsg.exe"
 
 [Registry]
 ; Append the install dir to the user PATH so `gsg` works in any terminal.
