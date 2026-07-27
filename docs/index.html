@@ -273,6 +273,11 @@ main h2 { font-size: clamp(1.5rem, 3.4vw, 2.15rem); }
    the difference between "a div with a border" and something that looks made. */
 .surface {
   position: relative; isolation: isolate;
+  /* Without this a grid item's floor is its min-content width. The install
+     card holds an unbreakable pip URL whose min-content is 612px, which stops
+     auto-fit from ever fitting a third column and strands that card alone on
+     its own row. */
+  min-width: 0;
   border: 1px solid var(--line); border-radius: 16px;
   background:
     linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0) 42%),
@@ -321,18 +326,45 @@ main h2 { font-size: clamp(1.5rem, 3.4vw, 2.15rem); }
 .step h3 { font-size: 1.02rem; margin: 0 0 .45rem; }
 .step p { color: var(--muted); font-size: .91rem; margin: 0; line-height: 1.6; }
 
-.rules { list-style: none; padding: 0; margin: 0; display: grid; gap: .8rem; }
-.rules li {
-  border: 1px solid var(--line); border-left: 3px solid var(--ok);
-  border-radius: 10px; padding: 1rem 1.2rem; background: var(--bg-raised);
+/* Two columns rather than five full-width bars, which read as a stack of
+   unrelated banners instead of one set of guarantees. */
+.rules { list-style: none; padding: 0; margin: 0; display: grid; gap: .9rem; }
+@media (min-width: 900px) {
+  /* Two columns, and the fifth rule spans both. There are five of these, so
+     any even grid leaves a hole — better to make the last one look intended
+     than to end on a ragged gap. */
+  .rules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rules li:last-child { grid-column: 1 / -1; }
 }
-.rules b { display: block; margin-bottom: .15rem; }
-.rules span { color: var(--muted); font-size: .92rem; }
+.rules li { display: flex; gap: .95rem; align-items: flex-start; padding: 1.15rem 1.3rem; }
+.rules .tick {
+  flex: none; width: 27px; height: 27px; margin-top: .1rem;
+  display: grid; place-items: center; border-radius: 8px;
+  background: rgba(63,185,80,.14); border: 1px solid rgba(63,185,80,.32);
+  color: #63d47a;
+}
+.rules .tick svg { width: 14px; height: 14px; }
+.rules b { display: block; margin-bottom: .2rem; font-size: .97rem; }
+.rules span.txt { color: var(--muted); font-size: .91rem; line-height: 1.6; display: block; }
 
 pre {
   background: var(--bg-sunken); border: 1px solid var(--line); border-radius: 10px;
   padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem;
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
 }
+pre::-webkit-scrollbar { height: 8px; }
+pre::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+pre::-webkit-scrollbar-track { background: transparent; }
+/* A single long URL should wrap, not put a scrollbar inside a small card. */
+pre.wrap-code { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
+
+/* Install links read as CTAs, not as body-copy links trailing an arrow. */
+.card-link {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .88rem; font-weight: 600; text-decoration: none;
+  color: #b7c6ff; transition: gap .16s ease, color .16s ease;
+}
+.card-link:hover { gap: .7rem; color: #dfe6ff; }
 code { font-family: var(--mono); font-size: .86rem; }
 p code, li code, td code, th code {
   background: var(--bg-sunken); border: 1px solid var(--line);
@@ -340,15 +372,33 @@ p code, li code, td code, th code {
 }
 .cmt { color: var(--dim); }
 
-.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
-table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: .9rem; }
-th, td { padding: .8rem 1rem; text-align: left; border-bottom: 1px solid var(--line); }
-thead th { background: var(--bg-sunken); font-weight: 600; font-size: .84rem; color: var(--muted); }
-tbody th { font-weight: 500; color: var(--text); }
+.table-scroll {
+  overflow-x: auto; border: 1px solid var(--line); border-radius: 16px;
+  background: var(--bg-raised);
+}
+/* Wide enough that "Game Backup Monitor" and "Needs a sync folder" stop
+   wrapping onto two lines and making the rows ragged. It scrolls inside
+   .table-scroll on narrow screens rather than squeezing. */
+table { border-collapse: collapse; width: 100%; min-width: 780px; font-size: .9rem; }
+th, td { padding: .85rem 1.15rem; text-align: left; border-bottom: 1px solid var(--line-soft); }
+thead th {
+  background: var(--bg-sunken); font-weight: 600; font-size: .74rem;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap; vertical-align: bottom;
+}
+tbody th { font-weight: 500; color: var(--text); width: 34%; }
+tbody tr { transition: background .16s ease; }
+tbody tr:hover { background: rgba(255,255,255,.022); }
 tbody tr:last-child > * { border-bottom: 0; }
-td.y { color: var(--ok); }
+/* Our own column, gently lifted so the eye lands on the comparison rather
+   than hunting for it. Nothing about the data changes. */
+thead th:nth-child(2), tbody td:nth-child(2) {
+  background: linear-gradient(180deg, rgba(108,92,231,.13), rgba(108,92,231,.06));
+}
+td.y, td.n, td.p { font-size: .86rem; }
+td.y { color: #63d47a; }
 td.n { color: var(--dim); }
-td.p { color: var(--warn); }
+td.p { color: #e0a93a; }
 
 .notice {
   border: 1px solid var(--line); border-left: 3px solid var(--warn);
@@ -643,11 +693,11 @@ footer a { color: var(--muted); }
       enforced in shared code, so every command and the dashboard all obey them.
     </p>
     <ul class="rules">
-      <li><b>Verify first</b><span>Downloads are integrity-checked and staged before anything on disk changes. A bad download changes nothing.</span></li>
-      <li><b>Safety backup always</b><span>Your current saves are snapshotted before every restore, and the restore aborts if that snapshot fails.</span></li>
-      <li><b>Strictly newer only</b><span>A restore happens only when the cloud is ahead of everything this machine has seen. Played offline? Your progress wins.</span></li>
-      <li><b>Never under a live game</b><span>If the game is running, you get a notification instead of a mid-session overwrite.</span></li>
-      <li><b>Usernames remapped</b><span>Saves recorded under <code>C:\Users\alice\…</code> restore correctly for <code>bob</code>.</span></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Verify first</b><span class="txt">Downloads are integrity-checked and staged before anything on disk changes. A bad download changes nothing.</span></div></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Safety backup always</b><span class="txt">Your current saves are snapshotted before every restore, and the restore aborts if that snapshot fails.</span></div></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Strictly newer only</b><span class="txt">A restore happens only when the cloud is ahead of everything this machine has seen. Played offline? Your progress wins.</span></div></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Never under a live game</b><span class="txt">If the game is running, you get a notification instead of a mid-session overwrite.</span></div></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Usernames remapped</b><span class="txt">Saves recorded under <code>C:\Users\alice\…</code> restore correctly for <code>bob</code>.</span></div></li>
     </ul>
   </div>
 </section>
@@ -693,21 +743,21 @@ footer a { color: var(--muted); }
         <h3>Windows installer</h3>
         <p>Per-user, no admin. Adds <code>gsg</code> to your terminal and a Start Menu entry.
            Removes itself cleanly.</p>
-        <p style="margin-top:.9rem;">
-          <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">GameSaveGenie-Setup.exe →</a>
+        <p style="margin-top:1rem;">
+          <a class="card-link" href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">GameSaveGenie-Setup.exe <span aria-hidden="true">&rarr;</span></a>
         </p>
       </div>
       <div class="card surface">
         <h3>Portable</h3>
         <p>A single <code>gsg.exe</code>. No install, no Python.</p>
-        <p style="margin-top:.9rem;">
-          <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">gsg.exe →</a>
+        <p style="margin-top:1rem;">
+          <a class="card-link" href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">gsg.exe <span aria-hidden="true">&rarr;</span></a>
         </p>
       </div>
       <div class="card surface">
         <h3>From source</h3>
         <p>Python 3.10+, Windows or Linux.</p>
-        <pre style="margin-top:.9rem;"><code>pip install git+https://github.com/Vasanthdev2004/Game-Save-Genie</code></pre>
+        <pre class="wrap-code" style="margin-top:1rem;"><code>pip install git+https://github.com/Vasanthdev2004/Game-Save-Genie</code></pre>
       </div>
     </div>
 
