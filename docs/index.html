@@ -22,27 +22,27 @@
 <meta name="twitter:image" content="https://vasanthdev2004.github.io/Game-Save-Genie/assets/social-card.png">
 
 <style>
-/* Self-contained on purpose: no fonts, analytics, or assets from anywhere
-   else. The product has no telemetry; its website shouldn't either. */
+/* Self-contained on purpose: no web fonts, analytics, CDN or anything else
+   fetched from another host. The product has no telemetry; its website
+   shouldn't be what introduces some. That rules out Google Fonts, so the
+   "pixel" accents use a monospace stack instead of a downloaded bitmap face. */
 :root {
   color-scheme: dark;
-  --bg: #0d1017;
-  --bg-raised: #151a24;
-  --bg-sunken: #090b10;
-  --line: #232a38;
-  --text: #e6e9ef;
-  --muted: #99a2b4;
-  /* 4.75:1 against --bg-raised, the worst case it appears on. The previous
-     value was 3.71:1 and is used for captions and footer text, which is
-     small enough to need the full AA ratio. */
+  --bg: #07080c;
+  --bg-raised: #101420;
+  --bg-sunken: #05060a;
+  --line: #1e2534;
+  --line-soft: #161c28;
+  --text: #f2f4f8;
+  --muted: #a2abbd;
   --dim: #7c8699;
   --brand: #6c5ce7;
   --brand-2: #4a80f0;
+  --accent: #ff5a67;
   --ok: #3fb950;
   --warn: #d29922;
-  --bad: #f0616d;
   --radius: 14px;
-  --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
 }
 
@@ -55,14 +55,19 @@ body {
   color: var(--text);
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 a { color: #9dbaff; }
+h1, h2, h3 { line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 .5em; }
+p { margin: 0 0 1em; }
+img { max-width: 100%; }
+
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 .skip {
-  position: absolute; left: -9999px; top: 0; z-index: 10;
+  position: absolute; left: -9999px; top: 0; z-index: 100;
   background: var(--bg-raised); color: var(--text);
   padding: .7rem 1.1rem; border: 1px solid var(--line); border-radius: 0 0 8px 0;
 }
@@ -71,92 +76,192 @@ a { color: #9dbaff; }
 /* The browser default focus ring is close to invisible on this background,
    which makes the whole page unusable by keyboard. */
 :where(a, button, summary, [tabindex]):focus-visible {
-  outline: 2px solid #9dbaff;
-  outline-offset: 3px;
-  border-radius: 4px;
-}
-h1, h2, h3 { line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 .5em; }
-p { margin: 0 0 1em; }
-
-.wrap { width: min(1080px, 100% - 2.5rem); margin-inline: auto; }
-section { padding: 4.5rem 0; border-top: 1px solid var(--line); }
-section:first-of-type { border-top: 0; }
-.lede { color: var(--muted); font-size: 1.075rem; max-width: 62ch; }
-.eyebrow {
-  font: 600 .75rem/1 var(--mono);
-  letter-spacing: .12em; text-transform: uppercase;
-  color: var(--brand-2); margin-bottom: .9rem;
+  outline: 2px solid #9dbaff; outline-offset: 3px; border-radius: 4px;
 }
 
-/* ---- hero ---- */
+.wrap { width: min(1180px, 100% - 2.5rem); margin-inline: auto; }
+.mono { font-family: var(--mono); }
+
+/* ══ HERO: one locked viewport ══════════════════════════════════════════ */
 .hero {
   position: relative; overflow: hidden;
-  padding: 5rem 0 4rem;
-  background:
-    radial-gradient(60rem 30rem at 50% -12rem, rgba(108,92,231,.30), transparent 70%),
-    radial-gradient(40rem 22rem at 85% 0, rgba(74,128,240,.18), transparent 70%);
+  min-height: 100svh; display: flex; flex-direction: column;
+  padding: 0 clamp(1.25rem, 4vw, 3.5rem);
+  background: var(--bg-sunken);
 }
-.hero-inner { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.hero img.mark { width: 92px; height: 92px; border-radius: 22px; margin-bottom: 1.25rem; }
-.hero h1 { font-size: clamp(2.1rem, 6vw, 3.4rem); margin-bottom: .35rem; }
-.tagline {
-  font-size: clamp(1.05rem, 2.6vw, 1.3rem);
-  color: var(--text); font-weight: 500; margin-bottom: .75rem;
-}
-.hero .lede { text-align: center; }
 
-.badges { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; margin: .25rem 0 1.75rem; }
-.badge {
-  font: 500 .78rem/1 var(--sans);
-  padding: .42rem .7rem; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--bg-raised); color: var(--muted);
+/* Motion background, drawn rather than downloaded — no video file, no
+   third-party host, nothing to buffer on a phone. */
+.aurora { position: absolute; inset: -30%; z-index: 0; filter: blur(70px); opacity: .75; }
+.aurora span {
+  position: absolute; display: block; border-radius: 50%;
+  mix-blend-mode: screen; will-change: transform;
 }
-.badge b { color: var(--text); font-weight: 600; }
+.aurora span:nth-child(1) {
+  width: 52vw; height: 52vw; left: 6%; top: 4%;
+  background: radial-gradient(circle, rgba(108,92,231,.85), transparent 62%);
+  animation: drift-a 26s ease-in-out infinite;
+}
+.aurora span:nth-child(2) {
+  width: 46vw; height: 46vw; right: 4%; top: -4%;
+  background: radial-gradient(circle, rgba(74,128,240,.7), transparent 62%);
+  animation: drift-b 32s ease-in-out infinite;
+}
+.aurora span:nth-child(3) {
+  width: 40vw; height: 40vw; left: 34%; bottom: -12%;
+  background: radial-gradient(circle, rgba(255,90,103,.34), transparent 64%);
+  animation: drift-c 38s ease-in-out infinite;
+}
+@keyframes drift-a { 50% { transform: translate3d(8%, 6%, 0) scale(1.15); } }
+@keyframes drift-b { 50% { transform: translate3d(-9%, 8%, 0) scale(1.1); } }
+@keyframes drift-c { 50% { transform: translate3d(5%, -7%, 0) scale(1.2); } }
 
-.cta { display: flex; flex-wrap: wrap; gap: .75rem; justify-content: center; }
+/* A faint grid over the glow: reads as "tool", not "marketing splash". */
+.hero::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(120% 90% at 50% 30%, #000 30%, transparent 78%);
+}
+.hero > * { position: relative; z-index: 2; }
+
+/* ── nav ── */
+.nav { display: flex; align-items: center; justify-content: space-between; padding: 1.5rem 0; }
+.brand { display: flex; align-items: center; gap: .7rem; text-decoration: none; color: var(--text); }
+.brand img { width: 30px; height: 30px; border-radius: 8px; }
+.brand b { font-size: .95rem; letter-spacing: -.01em; }
+.nav-links { display: none; gap: 2rem; }
+.nav-links a {
+  font-size: .78rem; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text); text-decoration: none; opacity: .85; transition: opacity .15s ease;
+}
+.nav-links a:hover { opacity: .55; }
+.hamburger {
+  display: grid; place-items: center; padding: .5rem; background: none;
+  border: 0; color: var(--text); cursor: pointer; transition: opacity .15s ease;
+}
+.hamburger:hover { opacity: .6; }
+@media (min-width: 860px) {
+  .nav-links { display: flex; }
+  .hamburger { display: none; }
+}
+
+/* ── meta grid ── */
+.meta {
+  display: grid; gap: 1.25rem 1.5rem; margin-top: .75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 1040px) { .meta { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem; } }
+.meta h2 { font-size: clamp(1.05rem, 2.4vw, 1.35rem); letter-spacing: .02em; line-height: 1.05; margin: 0; }
+.meta h2 .alt {
+  display: block; font-family: var(--mono); font-weight: 400;
+  font-size: 1.35em; letter-spacing: -.03em;
+}
+.meta .note {
+  font-family: var(--mono); font-size: .7rem; line-height: 1.6;
+  color: var(--muted); margin: .75rem 0 0; max-width: 25ch;
+}
+.meta .label {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--dim); margin: 0 0 .6rem;
+}
+.meta .body { font-size: .84rem; color: var(--muted); margin: 0; max-width: 30ch; line-height: 1.55; }
+.meta ul { list-style: none; margin: 0; padding: 0; font-size: .84rem; color: var(--muted); line-height: 1.7; }
+
+/* ── the big statement ── */
+.hero-foot { padding-bottom: 1.5rem; }
+.statement {
+  display: grid; gap: 2rem; align-items: end;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1040px) { .statement { grid-template-columns: 1.35fr .65fr; } }
+
+.statement h1 {
+  margin: 0;
+  font-size: clamp(2.1rem, 7.2vw, 4.6rem);
+  line-height: .82;
+  letter-spacing: -.025em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.statement h1 .pixel {
+  font-family: var(--mono); font-weight: 400; font-size: 1.06em;
+  letter-spacing: -.045em; display: inline-block; line-height: .9;
+  background: linear-gradient(180deg, #fff, #9db4ff);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+.side { display: flex; flex-direction: column; gap: 1.25rem; align-items: flex-start; }
+@media (min-width: 1040px) { .side { align-items: flex-end; } }
+
 .btn {
-  display: inline-flex; align-items: center; gap: .5rem;
-  padding: .8rem 1.4rem; border-radius: 11px;
-  font-weight: 600; font-size: .96rem; text-decoration: none;
-  border: 1px solid transparent; transition: transform .12s ease, filter .12s ease;
+  display: inline-flex; align-items: center; gap: .6rem;
+  padding: .85rem 1.5rem; border-radius: 10px; text-decoration: none;
+  font-weight: 600; font-size: .93rem; letter-spacing: .01em;
+  border: 1px solid transparent; transition: transform .14s ease, filter .14s ease, background .14s ease;
 }
-.btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
-/* Its own darker blue rather than --brand-2: white at 15.4px/600 is not WCAG
-   "large text", so it needs the full 4.5:1, and #4a80f0 gives only 3.73:1.
-   #3a66cc keeps the whole gradient above 5:1. */
+.btn:hover { transform: translateY(-1px); filter: brightness(1.07); }
+/* White at this size/weight is not WCAG "large text", so the gradient has to
+   clear 4.5:1 along its whole length — #4a80f0 gives only 3.73:1. */
 .btn-primary { background: linear-gradient(135deg, var(--brand), #3a66cc); color: #fff; }
-.btn-ghost { border-color: var(--line); background: var(--bg-raised); color: var(--text); }
-.cta-note { color: var(--dim); font-size: .85rem; margin-top: .9rem; }
+.btn-ghost {
+  border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.05);
+  color: var(--text); backdrop-filter: blur(6px);
+}
+.btn-ghost:hover { background: rgba(255,255,255,.1); }
+.btn-row { display: flex; flex-wrap: wrap; gap: .75rem; }
 
-/* ---- screenshot ---- */
+.stats { display: flex; flex-wrap: wrap; gap: .5rem; }
+.stat {
+  display: flex; align-items: baseline; gap: .45rem;
+  background: rgba(6,8,13,.66); border: 1px solid var(--line-soft);
+  border-radius: 9px; padding: .55rem .85rem; backdrop-filter: blur(6px);
+}
+.stat b { font-family: var(--mono); font-size: 1rem; letter-spacing: -.02em; }
+.stat span { font-size: .68rem; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
+
+.hero-strip {
+  display: grid; gap: .5rem; margin-top: 1.75rem; padding-top: 1.1rem;
+  border-top: 1px solid var(--line-soft); font-size: .74rem; color: var(--muted);
+}
+@media (min-width: 720px) { .hero-strip { grid-template-columns: 1fr auto; align-items: center; } }
+.hero-strip a { color: var(--accent); text-decoration: none; }
+.hero-strip a:hover { color: #ff8a93; }
+.hero-strip .right { font-family: var(--mono); font-size: .7rem; color: var(--dim); }
+@media (min-width: 720px) { .hero-strip .right { text-align: right; } }
+
+/* ══ CONTENT BELOW THE FOLD ════════════════════════════════════════════ */
+main section { padding: 5rem 0; border-top: 1px solid var(--line); }
+.eyebrow {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--brand-2); margin-bottom: .9rem;
+}
+main h2 { font-size: clamp(1.5rem, 3.4vw, 2.15rem); }
+.lede { color: var(--muted); font-size: 1.05rem; max-width: 62ch; }
+
 .shot {
-  /* width:100% is load-bearing. .shot is a flex item of a column flex
-     container with align-items:center, so without it the box resolves to
-     fit-content — which the img's min-width pushes to ~700px, and the whole
-     PAGE scrolls sideways on a phone instead of just this container. */
-  width: 100%;
-  margin-top: 3rem; border: 1px solid var(--line); border-radius: var(--radius);
-  background: var(--bg-sunken); padding: .6rem; overflow-x: auto;
-  box-shadow: 0 24px 60px -30px rgba(0,0,0,.9);
+  /* width:100% is load-bearing: as a flex/grid item this box would otherwise
+     resolve to fit-content, the img's min-width would push it to ~700px, and
+     the PAGE would scroll sideways on a phone instead of this container. */
+  width: 100%; margin-top: 2.5rem;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-sunken); padding: .55rem; overflow-x: auto;
+  box-shadow: 0 30px 70px -34px rgba(0,0,0,.95);
 }
 .shot img {
-  display: block; width: 100%; min-width: 680px; border-radius: 8px;
-  /* Matches the SVG's aspect ratio so nothing below jumps as it loads. */
-  aspect-ratio: 1287 / 684.4; height: auto;
+  display: block; width: 100%; min-width: 680px; border-radius: 9px;
+  aspect-ratio: 1287 / 684.4; height: auto;   /* stops layout jumping on load */
 }
-.shot-caption { color: var(--dim); font-size: .85rem; text-align: center; margin-top: .85rem; }
+.shot-caption { color: var(--dim); font-size: .82rem; text-align: center; margin: .8rem 0 0; }
 
-/* ---- generic grid ---- */
 .grid { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
-.card {
-  border: 1px solid var(--line); border-radius: var(--radius);
-  background: var(--bg-raised); padding: 1.4rem;
-}
+.card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); padding: 1.4rem; }
 .card h3 { font-size: 1.02rem; display: flex; align-items: center; gap: .55rem; }
-.card p { color: var(--muted); font-size: .93rem; margin: 0; }
+.card p { color: var(--muted); font-size: .92rem; margin: 0; }
 .card .ico { font-size: 1.15rem; line-height: 1; }
 
-/* ---- numbered steps ---- */
 .steps { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); counter-reset: step; }
 .step { border: 1px solid var(--line); border-radius: var(--radius); padding: 1.4rem; background: var(--bg-raised); }
 .step::before {
@@ -166,65 +271,87 @@ section:first-of-type { border-top: 0; }
   background: linear-gradient(135deg, var(--brand), #3a66cc); color: #fff;
 }
 .step h3 { font-size: 1rem; }
-.step p { color: var(--muted); font-size: .93rem; margin: 0; }
+.step p { color: var(--muted); font-size: .92rem; margin: 0; }
 
-/* ---- trust list ---- */
 .rules { list-style: none; padding: 0; margin: 0; display: grid; gap: .8rem; }
 .rules li {
   border: 1px solid var(--line); border-left: 3px solid var(--ok);
   border-radius: 10px; padding: 1rem 1.2rem; background: var(--bg-raised);
 }
 .rules b { display: block; margin-bottom: .15rem; }
-.rules span { color: var(--muted); font-size: .93rem; }
+.rules span { color: var(--muted); font-size: .92rem; }
 
-/* ---- code ---- */
 pre {
   background: var(--bg-sunken); border: 1px solid var(--line); border-radius: 10px;
   padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem;
 }
-code { font-family: var(--mono); font-size: .88rem; }
-p code, li code, td code {
+code { font-family: var(--mono); font-size: .86rem; }
+p code, li code, td code, th code {
   background: var(--bg-sunken); border: 1px solid var(--line);
   padding: .12em .4em; border-radius: 5px; font-size: .86em;
 }
 .cmt { color: var(--dim); }
 
-/* ---- table ---- */
 .table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
-table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: .92rem; }
+table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: .9rem; }
 th, td { padding: .8rem 1rem; text-align: left; border-bottom: 1px solid var(--line); }
-th { background: var(--bg-sunken); font-weight: 600; font-size: .85rem; color: var(--muted); }
-tbody tr:last-child td { border-bottom: 0; }
+thead th { background: var(--bg-sunken); font-weight: 600; font-size: .84rem; color: var(--muted); }
+tbody th { font-weight: 500; color: var(--text); }
+tbody tr:last-child > * { border-bottom: 0; }
 td.y { color: var(--ok); }
 td.n { color: var(--dim); }
 td.p { color: var(--warn); }
 
-/* ---- notice ---- */
 .notice {
   border: 1px solid var(--line); border-left: 3px solid var(--warn);
   border-radius: 10px; padding: 1.1rem 1.3rem; background: var(--bg-raised);
-  color: var(--muted); font-size: .93rem;
+  color: var(--muted); font-size: .92rem;
 }
 .notice b { color: var(--text); }
 
-details {
-  border: 1px solid var(--line); border-radius: 10px;
-  padding: .9rem 1.2rem; background: var(--bg-raised); margin-bottom: .7rem;
-}
+details { border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1.2rem; background: var(--bg-raised); margin-bottom: .7rem; }
 summary { cursor: pointer; font-weight: 600; }
-details p { color: var(--muted); font-size: .93rem; margin: .8rem 0 0; }
+details p { color: var(--muted); font-size: .92rem; margin: .8rem 0 0; }
 
-footer { border-top: 1px solid var(--line); padding: 2.5rem 0 3.5rem; color: var(--dim); font-size: .9rem; }
+footer { border-top: 1px solid var(--line); padding: 2.5rem 0 3.5rem; color: var(--dim); font-size: .88rem; }
 footer a { color: var(--muted); }
 .foot-row { display: flex; flex-wrap: wrap; gap: 1.2rem; justify-content: space-between; align-items: center; }
 
-@media (max-width: 640px) {
-  section { padding: 3.25rem 0; }
-  .hero { padding: 3.25rem 0 2.5rem; }
+/* ── mobile menu ── */
+.menu {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(5,6,10,.96); backdrop-filter: blur(14px);
+  display: flex; flex-direction: column;
+  opacity: 0; pointer-events: none;
+  transition: opacity .5s cubic-bezier(.16,1,.3,1);
 }
+.menu[data-open="true"] { opacity: 1; pointer-events: auto; }
+.menu-head { display: flex; align-items: center; justify-content: space-between; padding: 1.5rem clamp(1.25rem, 4vw, 3.5rem); }
+.menu nav { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem; }
+.menu nav a {
+  font-size: 1.55rem; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--text); text-decoration: none;
+  opacity: 0; transform: translateY(1rem);
+  transition: opacity .5s cubic-bezier(.16,1,.3,1), transform .5s cubic-bezier(.16,1,.3,1);
+}
+.menu[data-open="true"] nav a { opacity: 1; transform: translateY(0); }
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .btn { transition: none; }
+  .aurora span { animation: none; }
+  .btn, .menu, .menu nav a { transition: none; }
+}
+@media (max-width: 640px) {
+  main section { padding: 3.5rem 0; }
+  /* The hero is a fixed composition, and on a phone the two blurbs are the
+     215px standing between it and fitting the viewport. They are flavour;
+     the headline, the download button and the stats are the job. */
+  .meta .note { display: none; }
+  .meta { gap: 1rem; }
+  .statement { gap: 1.25rem; }
+  .side { gap: .85rem; }
+  .hero-strip { margin-top: 1.1rem; padding-top: .85rem; }
+  .hero-foot { padding-bottom: 1rem; }
 }
 </style>
 </head>
@@ -233,41 +360,116 @@ footer a { color: var(--muted); }
 <a class="skip" href="#why">Skip to content</a>
 
 <header class="hero">
-  <div class="wrap hero-inner">
-    <img class="mark" src="assets/icon.png" alt="Game Save Genie logo: a magic lamp">
-    <h1>Game Save Genie</h1>
-    <p class="tagline">Steam Cloud for the games that don't have it.</p>
-    <p class="lede">
-      Automatic, versioned, self-hosted cloud save sync for PC games — Hydra and manual
-      installs, GOG offline installers, repacks, emulators. Anything a launcher isn't
-      protecting. Your saves, your cloud, no subscription.
-    </p>
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
 
-    <div class="badges">
-      <span class="badge"><b>19,000+</b> games known</span>
-      <span class="badge"><b>MIT</b> licensed</span>
-      <span class="badge"><b>No</b> telemetry</span>
-      <span class="badge"><b>v0.6.0</b></span>
+  <div class="nav">
+    <a class="brand" href="#">
+      <img src="assets/icon.png" alt="">
+      <b>Game Save Genie</b>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#why">Why</a>
+      <a href="#how">Setup</a>
+      <a href="#trust">Safety</a>
+      <a href="#compare">Compare</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/Vasanthdev2004/Game-Save-Genie">GitHub</a>
+    </nav>
+    <button class="hamburger" id="menu-open" aria-label="Open menu" aria-expanded="false" aria-controls="menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M3 6h18M3 12h18M3 18h18"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="meta">
+    <div>
+      <h2>GAME SAVE<span class="alt">GENIE</span></h2>
+      <p class="note">
+        Ludusavi knows where your saves are.<br>
+        rclone knows how to move them.<br>
+        This is the part that notices<br>
+        you stopped playing.
+      </p>
+    </div>
+    <div>
+      <h2>OPEN<span class="alt">SOURCE</span></h2>
+      <p class="note">
+        MIT licensed, no accounts,<br>
+        no servers of ours, and<br>
+        no telemetry of any kind.
+      </p>
+    </div>
+    <div>
+      <p class="label">What it does</p>
+      <p class="body">Backs up the games nothing else is protecting — automatically, versioned, to storage you already own.</p>
+    </div>
+    <div>
+      <p class="label">Works with</p>
+      <ul>
+        <li>Hydra &amp; manual installs</li>
+        <li>GOG offline installers</li>
+        <li>Repacks</li>
+        <li>Emulators (RetroArch, PCSX2…)</li>
+        <li>Google Drive / OneDrive / S3</li>
+        <li>Your own server</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="flex:1"></div>
+
+  <div class="hero-foot">
+    <div class="statement">
+      <h1>
+        Steam Cloud<br>
+        for the <span class="pixel">games</span><br>
+        that <span class="pixel">don't have it</span>
+      </h1>
+
+      <div class="side">
+        <div class="btn-row">
+          <a class="btn btn-primary" href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            Download for Windows
+          </a>
+          <a class="btn btn-ghost" href="#install">Other ways to install</a>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>19,000+</b><span>games known</span></div>
+          <div class="stat"><b>10</b><span>versions kept</span></div>
+          <div class="stat"><b>0</b><span>telemetry</span></div>
+        </div>
+      </div>
     </div>
 
-    <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">
-        Download for Windows
-      </a>
-      <a class="btn btn-ghost" href="https://github.com/Vasanthdev2004/Game-Save-Genie">
-        View on GitHub
-      </a>
+    <div class="hero-strip">
+      <div>Free and open source. <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/issues">Report a bug</a></div>
+      <div class="right">v0.6.0 &bull; Windows &bull; Linux (beta) &bull; MIT</div>
     </div>
-    <p class="cta-note">Per-user install, no admin needed. Linux supported (beta).</p>
-
-    <div class="shot">
-      <img src="assets/dashboard.svg" alt="The gsg dashboard: tracked games on the left with backup counts and cloud target, save versions on the right, and an activity log below.">
-    </div>
-    <p class="shot-caption">
-      <code>gsg</code> — arrow to a version, press <code>r</code> to restore. No ids to copy.
-    </p>
   </div>
 </header>
+
+<div class="menu" id="menu" data-open="false">
+  <div class="menu-head">
+    <a class="brand" href="#"><img src="assets/icon.png" alt=""><b>Game Save Genie</b></a>
+    <button class="hamburger" id="menu-close" aria-label="Close menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M18 6 6 18M6 6l12 12"/>
+      </svg>
+    </button>
+  </div>
+  <nav aria-label="Mobile">
+    <a href="#why">Why</a>
+    <a href="#how">Setup</a>
+    <a href="#trust">Safety</a>
+    <a href="#compare">Compare</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/Vasanthdev2004/Game-Save-Genie">GitHub</a>
+  </nav>
+</div>
 
 <main>
 
@@ -284,6 +486,12 @@ footer a { color: var(--muted); }
       Game Save Genie runs quietly in the background and gives those games what the
       launchers give theirs. Steam, Epic and Xbox titles are detected and skipped
       automatically — they already sync their own saves.
+    </p>
+    <div class="shot">
+      <img src="assets/dashboard.svg" alt="The gsg dashboard: tracked games on the left with backup counts and cloud target, save versions on the right, and an activity log below.">
+    </div>
+    <p class="shot-caption">
+      <code>gsg</code> — arrow to a version, press <code>r</code> to restore. No ids to copy.
     </p>
   </div>
 </section>
@@ -392,7 +600,7 @@ footer a { color: var(--muted); }
         </tbody>
       </table>
     </div>
-    <p class="lede" style="margin-top:1.1rem; font-size:.92rem;">
+    <p class="lede" style="margin-top:1.1rem; font-size:.9rem;">
       Game Backup Monitor is a good tool that also auto-backs-up and auto-restores — its
       difference is cloud: “cloud” there means pointing backups at a separate folder-sync
       client. Ludusavi is an excellent backup engine, and Game Save Genie is built on it.
@@ -514,6 +722,36 @@ gsg pull --all       <span class="cmt"># catch this machine up from the cloud</s
     </div>
   </div>
 </footer>
+
+<script>
+// The only interactivity on the page. A framework for this would be more
+// bytes than the whole document.
+(() => {
+  const menu = document.getElementById('menu');
+  const openBtn = document.getElementById('menu-open');
+  const closeBtn = document.getElementById('menu-close');
+  const links = menu.querySelectorAll('nav a');
+
+  const setOpen = (open) => {
+    menu.dataset.open = String(open);
+    openBtn.setAttribute('aria-expanded', String(open));
+    document.body.style.overflow = open ? 'hidden' : '';
+    links.forEach((link, i) => {
+      // Staggered entrance on the way in; all at once on the way out, so
+      // closing never feels like it lags behind the tap.
+      link.style.transitionDelay = open ? `${100 + i * 60}ms` : '0ms';
+    });
+    (open ? links[0] : openBtn).focus({ preventScroll: true });
+  };
+
+  openBtn.addEventListener('click', () => setOpen(true));
+  closeBtn.addEventListener('click', () => setOpen(false));
+  links.forEach((link) => link.addEventListener('click', () => setOpen(false)));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && menu.dataset.open === 'true') setOpen(false);
+  });
+})();
+</script>
 
 </body>
 </html>
