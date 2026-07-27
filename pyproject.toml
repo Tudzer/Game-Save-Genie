@@ -41,6 +41,9 @@ dependencies = [
     # worst thing about running one.
     "pystray>=0.19",
     "Pillow>=10.0",
+    # Interactive dashboard (`gsg ui`). Same author as rich, which is already
+    # a dependency; the command degrades to a clear error if it is missing.
+    "textual>=0.80",
 ]
 
 [project.optional-dependencies]

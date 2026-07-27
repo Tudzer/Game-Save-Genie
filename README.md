@@ -69,6 +69,7 @@ That's the whole setup. A wizard finds your games, connects your cloud (Google D
 ```bash
 gsg auto                  # the only command most people need — watch + backup + restore
 gsg auto --install        # start hidden at logon (per-user, no admin needed)
+gsg ui                    # interactive dashboard: browse versions, restore by arrow key
 
 gsg status                # per-game overview, storage meter, quota warning
 gsg scan                  # what's installed (--source all to include Steam/Epic/Xbox)

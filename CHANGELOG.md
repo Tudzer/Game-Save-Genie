@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- **`gsg ui` — an interactive dashboard.** Restoring a save was the one genuinely browse-and-select task in the product, and the CLI made you do it by eye: read a version id out of `gsg versions`, retype it into `gsg pull --version`. Copying a timestamp between two commands is a bad thing to ask of someone who has just lost progress. Now you arrow onto the version you want and press `r`. Games on the left with their version count, last backup and real cloud target; versions on the right, local or cloud (`c` toggles); a log pane for results. `b` backs up, `r` restores, `F5` refreshes.
+  - Restores always confirm first, and run the **same** code path as `gsg restore` / `gsg pull` — verification, the pre-restore safety backup, and the never-under-a-live-game rule are not reimplemented, so they cannot drift between the two front ends.
+  - Every rclone and Ludusavi call runs on a worker thread, so the interface never freezes during an upload.
 - **The app has a face.** A proper lamp icon now ships as the executable icon, the setup wizard icon, the Add/Remove Programs entry, and the Start Menu shortcut — all of which previously fell back to a generic default. Generated from a reviewable script (`packaging/make_icon.py`), not a committed mystery binary.
 - **System tray icon for `gsg auto`.** The watcher runs hidden by design, which meant it had no way to tell you anything. It now sits in the notification area, colour-coded — blue when everything is backed up, amber when a tracked game has never been backed up, red when a backup or upload failed — with the last event in the tooltip. Right-click for **Back up now**, **Show status**, **Open log folder**, and **Quit**. Disable with `gsg auto --no-tray`. Entirely optional: if the tray can't be created (headless Linux, no notification area, missing dependency) the watcher runs exactly as before.
 

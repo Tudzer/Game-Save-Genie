@@ -340,6 +340,32 @@ def list_games(ctx: typer.Context) -> None:
     console.print(table)
 
 
+@app.command(name="ui")
+def ui_command(ctx: typer.Context) -> None:
+    """Open the interactive dashboard: browse games and versions, restore by arrow key.
+
+    Everything here calls the same code as the commands — including the
+    pre-restore safety backup — so there is no second, weaker path to your
+    save files.
+    """
+    config_path = ctx.obj.get("config_path")
+    if not sys.stdout.isatty():
+        console.print(
+            "[red]'gsg ui' needs an interactive terminal. "
+            "Use 'gsg status' / 'gsg versions' when piping output.[/red]"
+        )
+        raise typer.Exit(1)
+    try:
+        from . import ui
+    except ImportError as exc:
+        console.print(
+            f"[red]The dashboard needs Textual, which is not installed ({exc}).[/red]\n"
+            "[dim]Install it with: pip install textual[/dim]"
+        )
+        raise typer.Exit(1) from exc
+    ui.run(config_path)
+
+
 @app.command()
 def remove(
     ctx: typer.Context,
@@ -555,7 +581,7 @@ def backup(
             # No provider gate here: `_cloud_upload` resolves the effective
             # provider itself, so `gsg backup` uploads exactly what `gsg auto`
             # would. They used to disagree.
-            _cloud_upload(ctx, game, result.version, dry_run=False)
+            _cloud_upload(config_path, game, result.version, dry_run=False)
 
 
 @app.command()
@@ -592,12 +618,32 @@ def restore(
         return
 
     config = load_config(config_path)
+    ok, message = restore_local_version(game, version, config, db, config_path, no_safety)
+    console.print(f"[{'green' if ok else 'red'}]{message}[/]")
+    if not ok:
+        raise typer.Exit(1)
+
+
+def restore_local_version(
+    game: Game,
+    version: SaveVersion,
+    config: SyncConfig,
+    db: Database,
+    config_path: Path | None,
+    no_safety: bool = False,
+) -> tuple[bool, str]:
+    """Verify, safety-backup, and apply a local snapshot.
+
+    Returns ``(ok, message)`` instead of printing and raising ``typer.Exit``,
+    so a non-CLI caller (the TUI) runs this exact code path rather than a
+    reimplementation of it — the safety rules must not have two versions.
+    """
     ludusavi_path = None if game.custom else get_ludusavi_path(config_path)
 
     # Verify and stage the snapshot BEFORE touching anything on disk.
     restore_source = _materialize_version(version, game)
     if restore_source is None:
-        raise typer.Exit(1)
+        return False, f"Snapshot for {version.id} is missing or failed verification."
 
     # Secure the current on-disk state so this restore can be undone.
     if not no_safety:
@@ -607,18 +653,16 @@ def restore(
             protect_id=version.id,
         )
         if not safety.success:
-            console.print(
-                f"[red]Safety backup failed ({safety.message}); aborting restore. "
-                f"Pass --no-safety to restore anyway.[/red]"
+            return False, (
+                f"Safety backup failed ({safety.message}); nothing was restored. "
+                f"Pass --no-safety to restore anyway."
             )
-            raise typer.Exit(1)
 
     try:
         _apply_staged_backup(game, restore_source, ludusavi_path)
     except RuntimeError as exc:
-        console.print(f"[red]Restore failed: {exc}[/red]")
-        raise typer.Exit(1) from exc
-    console.print(f"[green]Restored {game.title} from version {version.id}[/green]")
+        return False, f"Restore failed: {exc}"
+    return True, f"Restored {game.title} from version {version.id}"
 
 
 def _apply_staged_backup(
@@ -883,7 +927,7 @@ def watch(ctx: typer.Context) -> None:
         )
         console.print(f"{'[green]' if result.success else '[red]'}{result.message}[/]")
         if result.success and result.version:
-            _cloud_upload(ctx, game, result.version, dry_run=False)
+            _cloud_upload(config_path, game, result.version, dry_run=False)
 
     watcher = GameWatcher(games)
     watcher.set_on_game_close(on_close)
@@ -1130,7 +1174,7 @@ def auto(
         )
         uploaded: bool | None = None
         if result.success and result.version and result.files_changed > 0:
-            uploaded = _cloud_upload(ctx, game, result.version, dry_run=False)
+            uploaded = _cloud_upload(config_path, game, result.version, dry_run=False)
         report_backup(game, result, uploaded)
 
     def on_close(game: Game, proc_info: ProcessInfo) -> None:
@@ -1997,7 +2041,7 @@ def _materialize_version(version: SaveVersion, game: Game) -> Path | None:
 
 
 def _cloud_upload(
-    ctx: typer.Context,
+    config_path: Path | None,
     game: Game,
     version: SaveVersion,
     dry_run: bool,
@@ -2007,8 +2051,10 @@ def _cloud_upload(
     Returns False only when an upload was actually attempted and failed, so a
     caller can tell "nothing to do" apart from "your save did not reach the
     cloud" — the tray and its notifications depend on that distinction.
+
+    Takes a config path rather than a Typer context so callers that are not
+    commands (the TUI) can reach it without inventing one.
     """
-    config_path = ctx.obj.get("config_path")
     config = load_config(config_path)
     if not _effective_provider(game, config):
         return True
