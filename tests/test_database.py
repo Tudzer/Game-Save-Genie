@@ -159,3 +159,37 @@ def test_delete_version(tmp_path: Path) -> None:
     db.add_version(_make_version("v1", tmp_path))
     db.delete_version("v1")
     assert db.get_version("v1") is None
+
+
+def test_delete_game_removes_versions_and_sync_state(tmp_path: Path) -> None:
+    """Untracking must not leave rows behind: retention only ever prunes games
+    in games.yaml, so orphans are unreachable — and re-adding the same title
+    would resurrect history pointing at deleted snapshots."""
+    db = Database(tmp_path / "test.db")
+    db.add_version(_make_version("v1", tmp_path, minute=0))
+    db.add_version(_make_version("v2", tmp_path, minute=1))
+    db.update_sync_state("game", "v2")
+    db.add_version(
+        SaveVersion(
+            id="other-v1",
+            game_id="other-game",
+            created_at=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            local_path=tmp_path / "backups" / "other-game",
+            size_bytes=100,
+            file_count=1,
+            platform=Platform.WINDOWS,
+        )
+    )
+
+    assert db.delete_game("game") == 2
+    assert db.get_versions("game") == []
+    assert db.get_sync_state("game") is None
+    # A neighbouring game is untouched.
+    assert len(db.get_versions("other-game")) == 1
+
+
+def test_delete_game_is_a_noop_for_an_unknown_game(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    db.add_version(_make_version("v1", tmp_path))
+    assert db.delete_game("never-existed") == 0
+    assert db.get_version("v1") is not None
