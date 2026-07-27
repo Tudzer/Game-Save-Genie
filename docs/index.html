@@ -269,22 +269,57 @@ main h2 { font-size: clamp(1.5rem, 3.4vw, 2.15rem); }
 }
 .shot-caption { color: var(--dim); font-size: .82rem; text-align: center; margin: .8rem 0 0; }
 
+/* Surfaces get a top-lit gradient and a 1px highlight along their top edge —
+   the difference between "a div with a border" and something that looks made. */
+.surface {
+  position: relative; isolation: isolate;
+  border: 1px solid var(--line); border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0) 42%),
+    var(--bg-raised);
+  padding: 1.6rem 1.5rem;
+  transition: border-color .22s ease, transform .22s ease, box-shadow .22s ease;
+}
+.surface::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px; border-radius: 16px 16px 0 0;
+  background: linear-gradient(90deg, transparent, rgba(190,205,255,.3), transparent);
+}
+.surface:hover {
+  border-color: rgba(140,163,255,.34);
+  transform: translateY(-3px);
+  box-shadow: 0 22px 46px -28px rgba(84,114,255,.7);
+}
+
 .grid { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
-.card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); padding: 1.4rem; }
-.card h3 { font-size: 1.02rem; display: flex; align-items: center; gap: .55rem; }
-.card p { color: var(--muted); font-size: .92rem; margin: 0; }
-.card .ico { font-size: 1.15rem; line-height: 1; }
+.card h3 { font-size: 1.04rem; margin: 0 0 .45rem; letter-spacing: -.012em; }
+.card p { color: var(--muted); font-size: .91rem; margin: 0; line-height: 1.6; }
+
+/* Monochrome line icons in a tinted well, stacked above the heading. Colour
+   emoji at four different visual weights was the loudest thing on the page. */
+.ico {
+  display: grid; place-items: center; width: 42px; height: 42px;
+  margin-bottom: 1.05rem; border-radius: 12px;
+  background: linear-gradient(142deg, rgba(122,99,255,.26), rgba(74,128,240,.1));
+  border: 1px solid rgba(150,170,255,.22);
+  color: #c3cdff;
+}
+.ico svg { width: 21px; height: 21px; }
 
 .steps { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); counter-reset: step; }
-.step { border: 1px solid var(--line); border-radius: var(--radius); padding: 1.4rem; background: var(--bg-raised); }
-.step::before {
-  counter-increment: step; content: counter(step);
-  display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: .8rem;
-  border-radius: 9px; font: 700 .9rem var(--mono);
-  background: linear-gradient(135deg, var(--brand), #3a66cc); color: #fff;
+.step { padding-top: 1.5rem; overflow: hidden; }
+.step .num {
+  display: block; font: 600 .72rem/1 var(--mono);
+  letter-spacing: .2em; color: var(--brand-2); margin-bottom: .9rem;
 }
-.step h3 { font-size: 1rem; }
-.step p { color: var(--muted); font-size: .92rem; margin: 0; }
+/* Oversized ghost numeral, cropped by the card — depth without weight. */
+.step::after {
+  counter-increment: step; content: counter(step);
+  position: absolute; right: .55rem; top: -.9rem; z-index: -1;
+  font: 800 5.4rem/1 var(--sans); letter-spacing: -.05em;
+  color: rgba(255,255,255,.045); pointer-events: none;
+}
+.step h3 { font-size: 1.02rem; margin: 0 0 .45rem; }
+.step p { color: var(--muted); font-size: .91rem; margin: 0; line-height: 1.6; }
 
 .rules { list-style: none; padding: 0; margin: 0; display: grid; gap: .8rem; }
 .rules li {
@@ -322,9 +357,28 @@ td.p { color: var(--warn); }
 }
 .notice b { color: var(--text); }
 
-details { border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1.2rem; background: var(--bg-raised); margin-bottom: .7rem; }
-summary { cursor: pointer; font-weight: 600; }
-details p { color: var(--muted); font-size: .92rem; margin: .8rem 0 0; }
+details {
+  border: 1px solid var(--line); border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0) 60%), var(--bg-raised);
+  padding: 1rem 1.25rem; margin-bottom: .7rem;
+  transition: border-color .2s ease, background .2s ease;
+}
+details:hover, details[open] { border-color: rgba(140,163,255,.3); }
+summary {
+  cursor: pointer; font-weight: 600; list-style: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+summary::-webkit-details-marker { display: none; }
+/* Own marker: the default triangle sits at a different size in every
+   browser and is the other thing that reads as unstyled. */
+summary::after {
+  content: ""; flex: none; width: 9px; height: 9px;
+  border-right: 1.6px solid var(--dim); border-bottom: 1.6px solid var(--dim);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .22s ease, border-color .22s ease;
+}
+details[open] summary::after { transform: rotate(-135deg) translate(-2px, -2px); border-color: #c3cdff; }
+details p { color: var(--muted); font-size: .92rem; margin: .85rem 0 0; line-height: 1.6; }
 
 footer { border-top: 1px solid var(--line); padding: 2.5rem 0 3.5rem; color: var(--dim); font-size: .88rem; }
 footer a { color: var(--muted); }
@@ -511,18 +565,21 @@ footer a { color: var(--muted); }
     <p class="eyebrow">Setup</p>
     <h2>Three steps, then forget it exists</h2>
     <div class="steps">
-      <div class="step">
+      <div class="step surface">
+        <span class="num">STEP 01</span>
         <h3>Install</h3>
         <p>Grab the installer, or the portable <code>gsg.exe</code>. Ludusavi and rclone are
            downloaded automatically the first time they're needed.</p>
       </div>
-      <div class="step">
+      <div class="step surface">
+        <span class="num">STEP 02</span>
         <h3>Connect your cloud</h3>
         <p>Run <code>gsg</code>. Google Drive and OneDrive open a browser — sign in, click
            Allow. For any S3 bucket or your own server, run <code>gsg setup-s3</code>
            instead.</p>
       </div>
-      <div class="step">
+      <div class="step surface">
+        <span class="num">STEP 03</span>
         <h3>Play</h3>
         <p><code>gsg auto</code> starts at logon and watches for games. Backups happen when a
            game closes and every 10 minutes while it runs.</p>
@@ -536,34 +593,40 @@ footer a { color: var(--muted); }
     <p class="eyebrow">What it does</p>
     <h2>Built to be boring, in the good way</h2>
     <div class="grid">
-      <div class="card">
-        <h3><span class="ico" aria-hidden="true">🕹️</span> Knows your games</h3>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="11" rx="4"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="12" r="1"/><circle cx="18.5" cy="14.5" r="1"/></svg></span>
+        <h3>Knows your games</h3>
         <p>Save locations for 19,000+ titles via the open-source Ludusavi database, plus
            process watching so it knows when you're actually playing.</p>
       </div>
-      <div class="card">
-        <h3><span class="ico" aria-hidden="true">🎮</span> Emulators too</h3>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></span>
+        <h3>Emulators too</h3>
         <p><code>gsg add --path</code> backs up any folder — RetroArch, PCSX2, Dolphin,
            memory cards, save states — so games Ludusavi doesn't know are covered.</p>
       </div>
-      <div class="card">
-        <h3><span class="ico" aria-hidden="true">🕰️</span> Every session is a version</h3>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 8v4.5l3 1.8"/></svg></span>
+        <h3>Every session is a version</h3>
         <p>Immutable, checksummed snapshots — roll back to any recent session, not just to
            “last backup”. The last 10 are kept by default; raise it with
            <code>max_versions</code>.</p>
       </div>
-      <div class="card">
-        <h3><span class="ico" aria-hidden="true">☁️</span> Your own cloud</h3>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10a4 4 0 0 0 .6-7.95 6 6 0 0 0-11.53-1.4A3.75 3.75 0 0 0 7 18Z"/><path d="M12 15v-5M9.8 12.2 12 10l2.2 2.2"/></svg></span>
+        <h3>Your own cloud</h3>
         <p>Google Drive, OneDrive, any S3 bucket, or anything rclone speaks. Delta uploads
            mean an unchanged 40 MB save is never re-sent.</p>
       </div>
-      <div class="card">
-        <h3><span class="ico" aria-hidden="true">🖥️</span> Follows you between PCs</h3>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="9" height="7" rx="1.5"/><rect x="13" y="13" width="9" height="7" rx="1.5"/><path d="M6.5 11v3.5H14"/><path d="M11.8 12.3 14 14.5l-2.2 2.2"/></svg></span>
+        <h3>Follows you between PCs</h3>
         <p>Restore on any machine, with paths remapped automatically when a save was
            recorded under a different Windows username.</p>
       </div>
-      <div class="card">
-        <h3><span class="ico" aria-hidden="true">🔔</span> Tells you when it breaks</h3>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 13 6 9Z"/><path d="M10.2 18a2 2 0 0 0 3.6 0"/></svg></span>
+        <h3>Tells you when it breaks</h3>
         <p>A tray icon shows at a glance whether your saves are safe, and goes red with a
            notification if a backup or upload fails.</p>
       </div>
@@ -626,7 +689,7 @@ footer a { color: var(--muted); }
     <p class="eyebrow">Get it</p>
     <h2>Install</h2>
     <div class="grid">
-      <div class="card">
+      <div class="card surface">
         <h3>Windows installer</h3>
         <p>Per-user, no admin. Adds <code>gsg</code> to your terminal and a Start Menu entry.
            Removes itself cleanly.</p>
@@ -634,14 +697,14 @@ footer a { color: var(--muted); }
           <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">GameSaveGenie-Setup.exe →</a>
         </p>
       </div>
-      <div class="card">
+      <div class="card surface">
         <h3>Portable</h3>
         <p>A single <code>gsg.exe</code>. No install, no Python.</p>
         <p style="margin-top:.9rem;">
           <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">gsg.exe →</a>
         </p>
       </div>
-      <div class="card">
+      <div class="card surface">
         <h3>From source</h3>
         <p>Python 3.10+, Windows or Linux.</p>
         <pre style="margin-top:.9rem;"><code>pip install git+https://github.com/Vasanthdev2004/Game-Save-Genie</code></pre>
