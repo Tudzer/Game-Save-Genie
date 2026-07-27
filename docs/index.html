@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game Save Genie — Steam Cloud for the games that don't have it</title>
+<meta name="description" content="Automatic, versioned, self-hosted cloud save sync for PC games. Hydra, GOG offline installers, repacks, emulators — anything a launcher isn't protecting. Your saves, your cloud, no subscription.">
+<link rel="icon" href="assets/icon.png" type="image/png">
+
+<!-- Absolute URLs on purpose: Reddit, Discord and Twitter do not resolve a
+     relative og:image, they just drop the preview. -->
+<meta property="og:title" content="Game Save Genie">
+<meta property="og:description" content="Steam Cloud for the games that don't have it. Automatic, versioned, self-hosted save sync for PC games.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://gsg.up.railway.app/">
+<meta property="og:image" content="https://gsg.up.railway.app/assets/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Game Save Genie">
+<meta name="twitter:description" content="Steam Cloud for the games that don't have it.">
+<meta name="twitter:image" content="https://gsg.up.railway.app/assets/social-card.png">
+
+<style>
+/* Self-contained on purpose: no web fonts, analytics, CDN or anything else
+   fetched from another host. The product has no telemetry; its website
+   shouldn't be what introduces some. That rules out Google Fonts, so the
+   "pixel" accents use a monospace stack instead of a downloaded bitmap face. */
+:root {
+  color-scheme: dark;
+  --bg: #07080c;
+  --bg-raised: #101420;
+  --bg-sunken: #05060a;
+  --line: #1e2534;
+  --line-soft: #161c28;
+  --text: #f2f4f8;
+  --muted: #a2abbd;
+  --dim: #7c8699;
+  --brand: #6c5ce7;
+  --brand-2: #4a80f0;
+  --accent: #ff5a67;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --radius: 14px;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+a { color: #9dbaff; }
+h1, h2, h3 { line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 .5em; }
+p { margin: 0 0 1em; }
+img { max-width: 100%; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.skip {
+  position: absolute; left: -9999px; top: 0; z-index: 100;
+  background: var(--bg-raised); color: var(--text);
+  padding: .7rem 1.1rem; border: 1px solid var(--line); border-radius: 0 0 8px 0;
+}
+.skip:focus { left: 0; }
+
+/* The browser default focus ring is close to invisible on this background,
+   which makes the whole page unusable by keyboard. */
+:where(a, button, summary, [tabindex]):focus-visible {
+  outline: 2px solid #9dbaff; outline-offset: 3px; border-radius: 4px;
+}
+
+.wrap { width: min(1180px, 100% - 2.5rem); margin-inline: auto; }
+.mono { font-family: var(--mono); }
+
+/* ══ HERO: one locked viewport ══════════════════════════════════════════ */
+.hero {
+  position: relative; overflow: hidden;
+  min-height: 100svh; display: flex; flex-direction: column;
+  padding: 0 clamp(1.25rem, 4vw, 3.5rem);
+  background: var(--bg-sunken);
+}
+
+/* Motion background, drawn rather than downloaded — no video file, no
+   third-party host, nothing to buffer on a phone. */
+/* Child selectors, because `.hero > *` below sets z-index 3 at equal
+   specificity and would otherwise win on order — putting both background
+   layers ABOVE the vignette that keeps the headline legible. */
+.hero > .aurora { position: absolute; inset: -30%; z-index: 0; filter: blur(70px); opacity: 1; }
+.aurora span {
+  position: absolute; display: block; border-radius: 50%;
+  mix-blend-mode: screen; will-change: transform;
+}
+.aurora span:nth-child(1) {
+  width: 62vw; height: 62vw; left: 2%; top: 12%;
+  background: radial-gradient(circle, rgba(120,96,255,1), transparent 60%);
+  animation: drift-a 26s ease-in-out infinite;
+}
+.aurora span:nth-child(2) {
+  width: 56vw; height: 56vw; right: -2%; top: 0%;
+  background: radial-gradient(circle, rgba(56,132,255,.95), transparent 60%);
+  animation: drift-b 32s ease-in-out infinite;
+}
+.aurora span:nth-child(3) {
+  width: 48vw; height: 48vw; left: 30%; bottom: -18%;
+  background: radial-gradient(circle, rgba(255,90,103,.5), transparent 62%);
+  animation: drift-c 38s ease-in-out infinite;
+}
+@keyframes drift-a { 50% { transform: translate3d(14%, -10%, 0) scale(1.25); } }
+@keyframes drift-b { 50% { transform: translate3d(-16%, 14%, 0) scale(1.18); } }
+@keyframes drift-c { 50% { transform: translate3d(10%, -14%, 0) scale(1.3); } }
+
+/* Save data on its way up to the cloud. Squares rather than dots because the
+   product's whole motif is pixels/blocks, and it fills the band between the
+   meta grid and the headline that was otherwise dead space. */
+.hero > .stream { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+
+/* A faint grid over the glow: reads as "tool", not "marketing splash". */
+.hero::after {
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+  background-size: 62px 62px;
+  mask-image: radial-gradient(125% 95% at 50% 34%, #000 26%, transparent 76%);
+}
+/* Keeps the headline legible over the brightest part of the glow. */
+.hero::before {
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: linear-gradient(180deg, rgba(5,6,10,.55) 0%, transparent 26%, transparent 52%, rgba(5,6,10,.72) 100%);
+}
+.hero > * { position: relative; z-index: 3; }
+
+/* ── nav ── */
+.nav { display: flex; align-items: center; justify-content: space-between; padding: 1.5rem 0; }
+.brand { display: flex; align-items: center; gap: .7rem; text-decoration: none; color: var(--text); }
+.brand img { width: 30px; height: 30px; border-radius: 8px; }
+.brand b { font-size: .95rem; letter-spacing: -.01em; }
+.nav-links { display: none; gap: 2rem; }
+.nav-links a {
+  font-size: .78rem; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text); text-decoration: none; opacity: .85; transition: opacity .15s ease;
+}
+.nav-links a:hover { opacity: .55; }
+.hamburger {
+  display: grid; place-items: center; padding: .5rem; background: none;
+  border: 0; color: var(--text); cursor: pointer; transition: opacity .15s ease;
+}
+.hamburger:hover { opacity: .6; }
+@media (min-width: 860px) {
+  .nav-links { display: flex; }
+  .hamburger { display: none; }
+}
+
+/* ── meta grid ── */
+.meta {
+  display: grid; gap: 1.25rem 1.5rem; margin-top: .75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 1040px) { .meta { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem; } }
+.meta h2 { font-size: clamp(1.05rem, 2.4vw, 1.35rem); letter-spacing: .02em; line-height: 1.05; margin: 0; }
+.meta h2 .alt {
+  display: block; font-family: var(--mono); font-weight: 400;
+  font-size: 1.35em; letter-spacing: -.03em;
+}
+.meta .note {
+  font-family: var(--mono); font-size: .7rem; line-height: 1.6;
+  color: var(--muted); margin: .75rem 0 0; max-width: 25ch;
+}
+.meta .label {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--dim); margin: 0 0 .6rem;
+}
+.meta .body { font-size: .84rem; color: var(--muted); margin: 0; max-width: 30ch; line-height: 1.55; }
+.meta ul { list-style: none; margin: 0; padding: 0; font-size: .84rem; color: var(--muted); line-height: 1.7; }
+
+/* ── the big statement ── */
+.hero-foot { padding-bottom: 1.5rem; }
+.statement {
+  display: grid; gap: 2rem; align-items: end;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1040px) { .statement { grid-template-columns: 1.35fr .65fr; } }
+
+.statement h1 {
+  margin: 0;
+  font-size: clamp(2.1rem, 7.2vw, 4.6rem);
+  line-height: .82;
+  letter-spacing: -.025em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.statement h1 .pixel {
+  font-family: var(--mono); font-weight: 400; font-size: 1.06em;
+  letter-spacing: -.045em; display: inline-block; line-height: .9;
+  background: linear-gradient(180deg, #fff, #9db4ff);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+.side { display: flex; flex-direction: column; gap: 1.25rem; align-items: flex-start; }
+@media (min-width: 1040px) { .side { align-items: flex-end; } }
+
+.btn {
+  display: inline-flex; align-items: center; gap: .6rem;
+  padding: .85rem 1.5rem; border-radius: 10px; text-decoration: none;
+  font-weight: 600; font-size: .93rem; letter-spacing: .01em;
+  border: 1px solid transparent; transition: transform .14s ease, filter .14s ease, background .14s ease;
+}
+.btn:hover { transform: translateY(-1px); filter: brightness(1.07); }
+/* White at this size/weight is not WCAG "large text", so the gradient has to
+   clear 4.5:1 along its whole length — #4a80f0 gives only 3.73:1. */
+.btn-primary { background: linear-gradient(135deg, var(--brand), #3a66cc); color: #fff; }
+.btn-ghost {
+  border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.05);
+  color: var(--text); backdrop-filter: blur(6px);
+}
+.btn-ghost:hover { background: rgba(255,255,255,.1); }
+.btn-row { display: flex; flex-wrap: wrap; gap: .75rem; }
+
+.stats { display: flex; flex-wrap: wrap; gap: .5rem; }
+.stat {
+  display: flex; align-items: baseline; gap: .45rem;
+  background: rgba(6,8,13,.66); border: 1px solid var(--line-soft);
+  border-radius: 9px; padding: .55rem .85rem; backdrop-filter: blur(6px);
+}
+.stat b { font-family: var(--mono); font-size: 1rem; letter-spacing: -.02em; }
+.stat span { font-size: .68rem; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
+
+.hero-strip {
+  display: grid; gap: .5rem; margin-top: 1.75rem; padding-top: 1.1rem;
+  border-top: 1px solid var(--line-soft); font-size: .74rem; color: var(--muted);
+}
+@media (min-width: 720px) { .hero-strip { grid-template-columns: 1fr auto; align-items: center; } }
+.hero-strip a { color: var(--accent); text-decoration: none; }
+.hero-strip a:hover { color: #ff8a93; }
+.hero-strip .right { font-family: var(--mono); font-size: .7rem; color: var(--dim); }
+@media (min-width: 720px) { .hero-strip .right { text-align: right; } }
+
+/* ══ CONTENT BELOW THE FOLD ════════════════════════════════════════════ */
+main section { padding: 5rem 0; border-top: 1px solid var(--line); }
+.eyebrow {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--brand-2); margin-bottom: .9rem;
+}
+main h2 { font-size: clamp(1.5rem, 3.4vw, 2.15rem); }
+.lede { color: var(--muted); font-size: 1.05rem; max-width: 62ch; }
+
+.shot {
+  /* width:100% is load-bearing: as a flex/grid item this box would otherwise
+     resolve to fit-content, the img's min-width would push it to ~700px, and
+     the PAGE would scroll sideways on a phone instead of this container. */
+  width: 100%; margin-top: 2.5rem;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-sunken); padding: .55rem; overflow-x: auto;
+  box-shadow: 0 30px 70px -34px rgba(0,0,0,.95);
+}
+.shot img {
+  display: block; width: 100%; min-width: 680px; border-radius: 9px;
+  aspect-ratio: 1287 / 684.4; height: auto;   /* stops layout jumping on load */
+}
+.shot-caption { color: var(--dim); font-size: .82rem; text-align: center; margin: .8rem 0 0; }
+
+/* Surfaces get a top-lit gradient and a 1px highlight along their top edge —
+   the difference between "a div with a border" and something that looks made. */
+.surface {
+  position: relative; isolation: isolate;
+  /* Without this a grid item's floor is its min-content width. The install
+     card holds an unbreakable pip URL whose min-content is 612px, which stops
+     auto-fit from ever fitting a third column and strands that card alone on
+     its own row. */
+  min-width: 0;
+  border: 1px solid var(--line); border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0) 42%),
+    var(--bg-raised);
+  padding: 1.6rem 1.5rem;
+  transition: border-color .22s ease, transform .22s ease, box-shadow .22s ease;
+}
+.surface::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px; border-radius: 16px 16px 0 0;
+  background: linear-gradient(90deg, transparent, rgba(190,205,255,.3), transparent);
+}
+.surface:hover {
+  border-color: rgba(140,163,255,.34);
+  transform: translateY(-3px);
+  box-shadow: 0 22px 46px -28px rgba(84,114,255,.7);
+}
+
+.grid { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
+.card h3 { font-size: 1.04rem; margin: 0 0 .45rem; letter-spacing: -.012em; }
+.card p { color: var(--muted); font-size: .91rem; margin: 0; line-height: 1.6; }
+
+/* Monochrome line icons in a tinted well, stacked above the heading. Colour
+   emoji at four different visual weights was the loudest thing on the page. */
+.ico {
+  display: grid; place-items: center; width: 42px; height: 42px;
+  margin-bottom: 1.05rem; border-radius: 12px;
+  background: linear-gradient(142deg, rgba(122,99,255,.26), rgba(74,128,240,.1));
+  border: 1px solid rgba(150,170,255,.22);
+  color: #c3cdff;
+}
+.ico svg { width: 21px; height: 21px; }
+
+.steps { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); counter-reset: step; }
+.step { padding-top: 1.5rem; overflow: hidden; }
+.step .num {
+  display: block; font: 600 .72rem/1 var(--mono);
+  letter-spacing: .2em; color: var(--brand-2); margin-bottom: .9rem;
+}
+/* Oversized ghost numeral, cropped by the card — depth without weight. */
+.step::after {
+  counter-increment: step; content: counter(step);
+  position: absolute; right: .55rem; top: -.9rem; z-index: -1;
+  font: 800 5.4rem/1 var(--sans); letter-spacing: -.05em;
+  color: rgba(255,255,255,.045); pointer-events: none;
+}
+.step h3 { font-size: 1.02rem; margin: 0 0 .45rem; }
+.step p { color: var(--muted); font-size: .91rem; margin: 0; line-height: 1.6; }
+
+/* Two columns rather than five full-width bars, which read as a stack of
+   unrelated banners instead of one set of guarantees. */
+.rules { list-style: none; padding: 0; margin: 0; display: grid; gap: .9rem; }
+@media (min-width: 900px) {
+  /* Two columns, and the fifth rule spans both. There are five of these, so
+     any even grid leaves a hole — better to make the last one look intended
+     than to end on a ragged gap. */
+  .rules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rules li:last-child { grid-column: 1 / -1; }
+}
+.rules li { display: flex; gap: .95rem; align-items: flex-start; padding: 1.15rem 1.3rem; }
+.rules .tick {
+  flex: none; width: 27px; height: 27px; margin-top: .1rem;
+  display: grid; place-items: center; border-radius: 8px;
+  background: rgba(63,185,80,.14); border: 1px solid rgba(63,185,80,.32);
+  color: #63d47a;
+}
+.rules .tick svg { width: 14px; height: 14px; }
+.rules b { display: block; margin-bottom: .2rem; font-size: .97rem; }
+.rules span.txt { color: var(--muted); font-size: .91rem; line-height: 1.6; display: block; }
+
+pre {
+  background: var(--bg-sunken); border: 1px solid var(--line); border-radius: 10px;
+  padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem;
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+pre::-webkit-scrollbar { height: 8px; }
+pre::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+pre::-webkit-scrollbar-track { background: transparent; }
+/* A single long URL should wrap, not put a scrollbar inside a small card. */
+pre.wrap-code { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
+
+/* Install links read as CTAs, not as body-copy links trailing an arrow. */
+.card-link {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .88rem; font-weight: 600; text-decoration: none;
+  color: #b7c6ff; transition: gap .16s ease, color .16s ease;
+}
+.card-link:hover { gap: .7rem; color: #dfe6ff; }
+code { font-family: var(--mono); font-size: .86rem; }
+p code, li code, td code, th code {
+  background: var(--bg-sunken); border: 1px solid var(--line);
+  padding: .12em .4em; border-radius: 5px; font-size: .86em;
+}
+.cmt { color: var(--dim); }
+
+.table-scroll {
+  overflow-x: auto; border: 1px solid var(--line); border-radius: 16px;
+  background: var(--bg-raised);
+}
+/* Wide enough that "Game Backup Monitor" and "Needs a sync folder" stop
+   wrapping onto two lines and making the rows ragged. It scrolls inside
+   .table-scroll on narrow screens rather than squeezing. */
+table { border-collapse: collapse; width: 100%; min-width: 780px; font-size: .9rem; }
+th, td { padding: .85rem 1.15rem; text-align: left; border-bottom: 1px solid var(--line-soft); }
+thead th {
+  background: var(--bg-sunken); font-weight: 600; font-size: .74rem;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap; vertical-align: bottom;
+}
+tbody th { font-weight: 500; color: var(--text); width: 34%; }
+tbody tr { transition: background .16s ease; }
+tbody tr:hover { background: rgba(255,255,255,.022); }
+tbody tr:last-child > * { border-bottom: 0; }
+/* Our own column, gently lifted so the eye lands on the comparison rather
+   than hunting for it. Nothing about the data changes. */
+thead th:nth-child(2), tbody td:nth-child(2) {
+  background: linear-gradient(180deg, rgba(108,92,231,.13), rgba(108,92,231,.06));
+}
+td.y, td.n, td.p { font-size: .86rem; }
+td.y { color: #63d47a; }
+td.n { color: var(--dim); }
+td.p { color: #e0a93a; }
+
+.notice {
+  border: 1px solid var(--line); border-left: 3px solid var(--warn);
+  border-radius: 10px; padding: 1.1rem 1.3rem; background: var(--bg-raised);
+  color: var(--muted); font-size: .92rem;
+}
+.notice b { color: var(--text); }
+
+details {
+  border: 1px solid var(--line); border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0) 60%), var(--bg-raised);
+  padding: 1rem 1.25rem; margin-bottom: .7rem;
+  transition: border-color .2s ease, background .2s ease;
+}
+details:hover, details[open] { border-color: rgba(140,163,255,.3); }
+summary {
+  cursor: pointer; font-weight: 600; list-style: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+summary::-webkit-details-marker { display: none; }
+/* Own marker: the default triangle sits at a different size in every
+   browser and is the other thing that reads as unstyled. */
+summary::after {
+  content: ""; flex: none; width: 9px; height: 9px;
+  border-right: 1.6px solid var(--dim); border-bottom: 1.6px solid var(--dim);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .22s ease, border-color .22s ease;
+}
+details[open] summary::after { transform: rotate(-135deg) translate(-2px, -2px); border-color: #c3cdff; }
+details p { color: var(--muted); font-size: .92rem; margin: .85rem 0 0; line-height: 1.6; }
+
+footer { border-top: 1px solid var(--line); padding: 2.5rem 0 3.5rem; color: var(--dim); font-size: .88rem; }
+footer a { color: var(--muted); }
+.foot-row { display: flex; flex-wrap: wrap; gap: 1.2rem; justify-content: space-between; align-items: center; }
+
+/* ── mobile menu ── */
+.menu {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(5,6,10,.96); backdrop-filter: blur(14px);
+  display: flex; flex-direction: column;
+  opacity: 0; pointer-events: none;
+  transition: opacity .5s cubic-bezier(.16,1,.3,1);
+}
+.menu[data-open="true"] { opacity: 1; pointer-events: auto; }
+.menu-head { display: flex; align-items: center; justify-content: space-between; padding: 1.5rem clamp(1.25rem, 4vw, 3.5rem); }
+.menu nav { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem; }
+.menu nav a {
+  font-size: 1.55rem; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--text); text-decoration: none;
+  opacity: 0; transform: translateY(1rem);
+  transition: opacity .5s cubic-bezier(.16,1,.3,1), transform .5s cubic-bezier(.16,1,.3,1);
+}
+.menu[data-open="true"] nav a { opacity: 1; transform: translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .aurora span { animation: none; }
+  .btn, .menu, .menu nav a { transition: none; }
+}
+@media (max-width: 640px) {
+  main section { padding: 3.5rem 0; }
+  /* The hero is a fixed composition, and on a phone the two blurbs are the
+     215px standing between it and fitting the viewport. They are flavour;
+     the headline, the download button and the stats are the job. */
+  .meta .note { display: none; }
+  .meta { gap: 1rem; }
+  .statement { gap: 1.25rem; }
+  .side { gap: .85rem; }
+  .hero-strip { margin-top: 1.1rem; padding-top: .85rem; }
+  .hero-foot { padding-bottom: 1rem; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#why">Skip to content</a>
+
+<header class="hero">
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+  <canvas class="stream" id="stream" aria-hidden="true"></canvas>
+
+  <div class="nav">
+    <a class="brand" href="#">
+      <img src="assets/icon.png" alt="">
+      <b>Game Save Genie</b>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#why">Why</a>
+      <a href="#how">Setup</a>
+      <a href="#trust">Safety</a>
+      <a href="#compare">Compare</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/Vasanthdev2004/Game-Save-Genie">GitHub</a>
+    </nav>
+    <button class="hamburger" id="menu-open" aria-label="Open menu" aria-expanded="false" aria-controls="menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M3 6h18M3 12h18M3 18h18"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="meta">
+    <div>
+      <h2>GAME SAVE<span class="alt">GENIE</span></h2>
+      <p class="note">
+        Ludusavi knows where your saves are. rclone knows how to move them.
+        This is the part that notices you stopped playing.
+      </p>
+    </div>
+    <div>
+      <h2>OPEN<span class="alt">SOURCE</span></h2>
+      <p class="note">
+        MIT licensed. No accounts, no servers of ours, no telemetry of any kind.
+      </p>
+    </div>
+    <div>
+      <p class="label">What it does</p>
+      <p class="body">Backs up the games nothing else is protecting — automatically, versioned, to storage you already own.</p>
+    </div>
+    <div>
+      <p class="label">Works with</p>
+      <ul>
+        <li>Hydra &amp; manual installs</li>
+        <li>GOG offline installers</li>
+        <li>Repacks</li>
+        <li>Emulators (RetroArch, PCSX2…)</li>
+        <li>Google Drive / OneDrive / S3</li>
+        <li>Your own server</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="flex:1"></div>
+
+  <div class="hero-foot">
+    <div class="statement">
+      <h1>
+        Steam Cloud<br>
+        for the <span class="pixel">games</span><br>
+        that <span class="pixel">don't have it</span>
+      </h1>
+
+      <div class="side">
+        <div class="btn-row">
+          <a class="btn btn-primary" href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            Download for Windows
+          </a>
+          <a class="btn btn-ghost" href="#install">Other ways to install</a>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>19,000+</b><span>games known</span></div>
+          <div class="stat"><b>10</b><span>versions kept</span></div>
+          <div class="stat"><b>0</b><span>telemetry</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-strip">
+      <div>Free and open source. <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/issues">Report a bug</a></div>
+      <div class="right">v0.6.0 &bull; Windows &bull; Linux (beta) &bull; MIT</div>
+    </div>
+  </div>
+</header>
+
+<div class="menu" id="menu" data-open="false">
+  <div class="menu-head">
+    <a class="brand" href="#"><img src="assets/icon.png" alt=""><b>Game Save Genie</b></a>
+    <button class="hamburger" id="menu-close" aria-label="Close menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M18 6 6 18M6 6l12 12"/>
+      </svg>
+    </button>
+  </div>
+  <nav aria-label="Mobile">
+    <a href="#why">Why</a>
+    <a href="#how">Setup</a>
+    <a href="#trust">Safety</a>
+    <a href="#compare">Compare</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/Vasanthdev2004/Game-Save-Genie">GitHub</a>
+  </nav>
+</div>
+
+<main>
+
+<section id="why">
+  <div class="wrap">
+    <p class="eyebrow">The problem</p>
+    <h2>If you play outside Steam, nothing is protecting your saves</h2>
+    <p class="lede">
+      One corrupted file, one Windows reinstall, one “wait — which PC did I play on last?”
+      and dozens of hours are gone. Paid save-sync services cap your history at a couple of
+      backups and delete everything when you stop paying.
+    </p>
+    <p class="lede">
+      Game Save Genie runs quietly in the background and gives those games what the
+      launchers give theirs. Steam, Epic and Xbox titles are detected and skipped
+      automatically — they already sync their own saves.
+    </p>
+    <div class="shot">
+      <img src="assets/dashboard.svg" alt="The gsg dashboard: tracked games on the left with backup counts and cloud target, save versions on the right, and an activity log below.">
+    </div>
+    <p class="shot-caption">
+      <code>gsg</code> — arrow to a version, press <code>r</code> to restore. No ids to copy.
+    </p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <p class="eyebrow">Setup</p>
+    <h2>Three steps, then forget it exists</h2>
+    <div class="steps">
+      <div class="step surface">
+        <span class="num">STEP 01</span>
+        <h3>Install</h3>
+        <p>Grab the installer, or the portable <code>gsg.exe</code>. Ludusavi and rclone are
+           downloaded automatically the first time they're needed.</p>
+      </div>
+      <div class="step surface">
+        <span class="num">STEP 02</span>
+        <h3>Connect your cloud</h3>
+        <p>Run <code>gsg</code>. Google Drive and OneDrive open a browser — sign in, click
+           Allow. For any S3 bucket or your own server, run <code>gsg setup-s3</code>
+           instead.</p>
+      </div>
+      <div class="step surface">
+        <span class="num">STEP 03</span>
+        <h3>Play</h3>
+        <p><code>gsg auto</code> starts at logon and watches for games. Backups happen when a
+           game closes and every 10 minutes while it runs.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <p class="eyebrow">What it does</p>
+    <h2>Built to be boring, in the good way</h2>
+    <div class="grid">
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="11" rx="4"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="12" r="1"/><circle cx="18.5" cy="14.5" r="1"/></svg></span>
+        <h3>Knows your games</h3>
+        <p>Save locations for 19,000+ titles via the open-source Ludusavi database, plus
+           process watching so it knows when you're actually playing.</p>
+      </div>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></span>
+        <h3>Emulators too</h3>
+        <p><code>gsg add --path</code> backs up any folder — RetroArch, PCSX2, Dolphin,
+           memory cards, save states — so games Ludusavi doesn't know are covered.</p>
+      </div>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 8v4.5l3 1.8"/></svg></span>
+        <h3>Every session is a version</h3>
+        <p>Immutable, checksummed snapshots — roll back to any recent session, not just to
+           “last backup”. The last 10 are kept by default; raise it with
+           <code>max_versions</code>.</p>
+      </div>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10a4 4 0 0 0 .6-7.95 6 6 0 0 0-11.53-1.4A3.75 3.75 0 0 0 7 18Z"/><path d="M12 15v-5M9.8 12.2 12 10l2.2 2.2"/></svg></span>
+        <h3>Your own cloud</h3>
+        <p>Google Drive, OneDrive, any S3 bucket, or anything rclone speaks. Delta uploads
+           mean an unchanged 40 MB save is never re-sent.</p>
+      </div>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="9" height="7" rx="1.5"/><rect x="13" y="13" width="9" height="7" rx="1.5"/><path d="M6.5 11v3.5H14"/><path d="M11.8 12.3 14 14.5l-2.2 2.2"/></svg></span>
+        <h3>Follows you between PCs</h3>
+        <p>Restore on any machine, with paths remapped automatically when a save was
+           recorded under a different Windows username.</p>
+      </div>
+      <div class="card surface">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 13 6 9Z"/><path d="M10.2 18a2 2 0 0 0 3.6 0"/></svg></span>
+        <h3>Tells you when it breaks</h3>
+        <p>A tray icon shows at a glance whether your saves are safe, and goes red with a
+           notification if a backup or upload fails.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="trust">
+  <div class="wrap">
+    <p class="eyebrow">Safety</p>
+    <h2>Why you can point it at your save files</h2>
+    <p class="lede">
+      A backup tool that corrupts a save is worse than no backup tool. These rules are
+      enforced in shared code, so every command and the dashboard all obey them.
+    </p>
+    <ul class="rules">
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Verify first</b><span class="txt">Downloads are integrity-checked and staged before anything on disk changes. A bad download changes nothing.</span></div></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Safety backup always</b><span class="txt">Your current saves are snapshotted before every restore, and the restore aborts if that snapshot fails.</span></div></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Strictly newer only</b><span class="txt">A restore happens only when the cloud is ahead of everything this machine has seen. Played offline? Your progress wins.</span></div></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Never under a live game</b><span class="txt">If the game is running, you get a notification instead of a mid-session overwrite.</span></div></li>
+      <li class="surface"><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>Usernames remapped</b><span class="txt">Saves recorded under <code>C:\Users\alice\…</code> restore correctly for <code>bob</code>.</span></div></li>
+    </ul>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <p class="eyebrow">Alternatives</p>
+    <h2>How it compares</h2>
+    <div class="table-scroll">
+      <table>
+        <caption class="sr-only">Game Save Genie compared with Ludusavi, Game Backup Monitor and Hydra Cloud</caption>
+        <thead>
+          <tr><td></td><th scope="col">Game Save Genie</th><th scope="col">Ludusavi</th><th scope="col">Game Backup Monitor</th><th scope="col">Hydra Cloud</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Auto-backup on game close</th><td class="y">Yes</td><td class="n">No</td><td class="y">Yes</td><td class="y">Yes</td></tr>
+          <tr><th scope="row">Periodic backup during play</th><td class="y">Yes</td><td class="n">No</td><td class="y">Yes</td><td class="n">No</td></tr>
+          <tr><th scope="row">Direct cloud upload, delta</th><td class="y">Yes</td><td class="y">Yes</td><td class="p">Needs a sync folder</td><td class="p">Their servers</td></tr>
+          <tr><th scope="row">Cross-machine path remapping</th><td class="y">Yes</td><td class="n">No</td><td class="n">No</td><td class="y">Yes</td></tr>
+          <tr><th scope="row">Version history</th><td class="y">Per session, 10 kept</td><td class="y">Yes</td><td class="y">Yes</td><td class="p">2 per game</td></tr>
+          <tr><th scope="row">Storage you own</th><td class="y">Yes</td><td class="y">Yes</td><td class="p">Sync folder</td><td class="n">Their servers</td></tr>
+          <tr><th scope="row">Free</th><td class="y">Yes</td><td class="y">Yes</td><td class="y">Yes</td><td class="n">Subscription</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede" style="margin-top:1.1rem; font-size:.9rem;">
+      Game Backup Monitor is a good tool that also auto-backs-up and auto-restores — its
+      difference is cloud: “cloud” there means pointing backups at a separate folder-sync
+      client. Ludusavi is an excellent backup engine, and Game Save Genie is built on it.
+      Hydra Cloud caps each backup at 500&nbsp;MB and deletes saves 7 days after a
+      subscription ends. Comparison reflects mid-2026 — check each project for current
+      features.
+    </p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <p class="eyebrow">Get it</p>
+    <h2>Install</h2>
+    <div class="grid">
+      <div class="card surface">
+        <h3>Windows installer</h3>
+        <p>Per-user, no admin. Adds <code>gsg</code> to your terminal and a Start Menu entry.
+           Removes itself cleanly.</p>
+        <p style="margin-top:1rem;">
+          <a class="card-link" href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">GameSaveGenie-Setup.exe <span aria-hidden="true">&rarr;</span></a>
+        </p>
+      </div>
+      <div class="card surface">
+        <h3>Portable</h3>
+        <p>A single <code>gsg.exe</code>. No install, no Python.</p>
+        <p style="margin-top:1rem;">
+          <a class="card-link" href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases/latest">gsg.exe <span aria-hidden="true">&rarr;</span></a>
+        </p>
+      </div>
+      <div class="card surface">
+        <h3>From source</h3>
+        <p>Python 3.10+, Windows or Linux.</p>
+        <pre class="wrap-code" style="margin-top:1rem;"><code>pip install git+https://github.com/Vasanthdev2004/Game-Save-Genie</code></pre>
+      </div>
+    </div>
+
+    <h3 style="margin-top:2.5rem;">Everyday commands</h3>
+    <pre><code>gsg                  <span class="cmt"># the dashboard — browse versions, restore</span>
+gsg auto --install   <span class="cmt"># start at logon, hidden, with a tray icon</span>
+
+gsg status           <span class="cmt"># per-game overview and storage</span>
+gsg backup           <span class="cmt"># back up now</span>
+gsg pull --all       <span class="cmt"># catch this machine up from the cloud</span></code></pre>
+
+    <p class="notice" style="margin-top:1.5rem;">
+      <b>Status:</b> single-machine backup on Windows is stable and used daily.
+      Cross-machine sync and Linux/Steam Deck support are <b>beta</b> — solid in testing,
+      but not yet battle-tested across many setups. Keep a second copy of anything
+      precious for now, and please
+      <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/issues">file an issue</a>
+      with anything you hit.
+    </p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <p class="eyebrow">Questions</p>
+    <h2>FAQ</h2>
+
+    <details>
+      <summary>Where do my saves actually live?</summary>
+      <p>In storage you own. On your PC, every version is a plain zip of a Ludusavi backup
+         tree you can open with anything. In the cloud they're stored de-duplicated — each
+         file's contents once under its SHA-256, plus a readable JSON manifest per version —
+         which is how an unchanged 40&nbsp;MB save avoids being re-uploaded.</p>
+      <p>No accounts, no servers of ours, no telemetry: <code>gsg</code> only ever talks to
+         the remote you configured and to GitHub, to download Ludusavi and rclone.</p>
+    </details>
+
+    <details>
+      <summary>What happens if I stop using it?</summary>
+      <p>Nothing expires and there's no subscription to lapse. Your local snapshots are
+         plain zips of a Ludusavi backup tree, so Ludusavi can restore them directly without
+         <code>gsg</code> involved at all.</p>
+      <p>The cloud copy is content-addressed, so rebuilding it by hand means following a
+         manifest — plain JSON listing each file's path and hash. It's MIT-licensed and runs
+         on your own storage, so there's no vendor here to cut you off.</p>
+    </details>
+
+    <details>
+      <summary>Does it interfere with Steam or Epic?</summary>
+      <p>No. Games belonging to Steam, Epic and Xbox are detected and skipped, because those
+         launchers already sync their own saves. It only handles what nothing else is
+         covering.</p>
+    </details>
+
+    <details>
+      <summary>Can I self-host the storage?</summary>
+      <p>Yes. There's a <code>docker compose up</code> save server that works with any
+         S3-compatible store — MinIO, Garage, TrueNAS — with per-friend accounts, so your
+         saves never leave your network.</p>
+    </details>
+
+    <details>
+      <summary>Linux or Steam Deck?</summary>
+      <p>Beta, and testers are genuinely valuable. The full pipeline runs on Linux, with a
+         systemd user service, <code>notify-send</code> notifications, and Steam detection
+         across native, Deck and Flatpak paths. What it needs now is real-world mileage.</p>
+    </details>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-row">
+    <div>
+      <a href="https://github.com/Vasanthdev2004/Game-Save-Genie">GitHub</a> ·
+      <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/releases">Releases</a> ·
+      <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/issues">Issues</a> ·
+      <a href="https://github.com/Vasanthdev2004/Game-Save-Genie/blob/main/CHANGELOG.md">Changelog</a>
+    </div>
+    <div>
+      MIT licensed · built on
+      <a href="https://github.com/mtkennerly/ludusavi">Ludusavi</a> and
+      <a href="https://rclone.org/">rclone</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+// The only interactivity on the page. A framework for this would be more
+// bytes than the whole document.
+(() => {
+  const menu = document.getElementById('menu');
+  const openBtn = document.getElementById('menu-open');
+  const closeBtn = document.getElementById('menu-close');
+  const links = menu.querySelectorAll('nav a');
+
+  const setOpen = (open) => {
+    menu.dataset.open = String(open);
+    openBtn.setAttribute('aria-expanded', String(open));
+    document.body.style.overflow = open ? 'hidden' : '';
+    links.forEach((link, i) => {
+      // Staggered entrance on the way in; all at once on the way out, so
+      // closing never feels like it lags behind the tap.
+      link.style.transitionDelay = open ? `${100 + i * 60}ms` : '0ms';
+    });
+    (open ? links[0] : openBtn).focus({ preventScroll: true });
+  };
+
+  openBtn.addEventListener('click', () => setOpen(true));
+  closeBtn.addEventListener('click', () => setOpen(false));
+  links.forEach((link) => link.addEventListener('click', () => setOpen(false)));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && menu.dataset.open === 'true') setOpen(false);
+  });
+})();
+
+// Save data rising to the cloud. Blocks, not dots — the product's motif is
+// pixels, and it reads as "files moving" rather than generic sparkles.
+(() => {
+  const canvas = document.getElementById('stream');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  if (!canvas || !canvas.getContext) return;
+
+  const ctx = canvas.getContext('2d', { alpha: true });
+  const TINTS = ['160,150,255', '110,170,255', '230,238,255'];
+  let blocks = [];
+  let w = 0, h = 0, raf = 0, last = 0;
+
+  const rand = (min, max) => min + Math.random() * (max - min);
+
+  const spawn = (seeded) => ({
+    x: rand(0, w),
+    // Seeded blocks start scattered so the field is already full on paint,
+    // instead of everything rising from the bottom edge at once.
+    y: seeded ? rand(0, h) : h + rand(0, 120),
+    size: rand(1.5, 4.5),
+    speed: rand(7, 26),
+    drift: rand(-0.35, 0.35),
+    phase: rand(0, Math.PI * 2),
+    tint: TINTS[(Math.random() * TINTS.length) | 0],
+    alpha: rand(0.18, 0.75),
+  });
+
+  const resize = () => {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const rect = canvas.getBoundingClientRect();
+    w = rect.width; h = rect.height;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Density by area, bounded so a 4K monitor doesn't get thousands.
+    const count = Math.max(28, Math.min(120, Math.round((w * h) / 17000)));
+    blocks = Array.from({ length: count }, () => spawn(true));
+  };
+
+  const draw = (now) => {
+    const dt = Math.min((now - last) / 1000, 0.05);   // clamp after a tab switch
+    last = now;
+    ctx.clearRect(0, 0, w, h);
+    for (const b of blocks) {
+      b.y -= b.speed * dt;
+      b.phase += dt * 0.7;
+      const x = b.x + Math.sin(b.phase) * 14 * b.drift;
+      // Fade out over the top third so nothing pops out of existence.
+      const fade = b.y < h * 0.34 ? Math.max(0, b.y / (h * 0.34)) : 1;
+      ctx.fillStyle = `rgba(${b.tint},${b.alpha * fade})`;
+      ctx.fillRect(x, b.y, b.size, b.size);
+      if (b.y + b.size < 0) Object.assign(b, spawn(false));
+    }
+    raf = requestAnimationFrame(draw);
+  };
+
+  const start = () => {
+    if (raf || reduced.matches) return;
+    last = performance.now();
+    raf = requestAnimationFrame(draw);
+  };
+  const stop = () => { cancelAnimationFrame(raf); raf = 0; };
+
+  const paintStatic = () => {
+    // Reduced motion still gets the texture, just held still.
+    ctx.clearRect(0, 0, w, h);
+    for (const b of blocks) {
+      ctx.fillStyle = `rgba(${b.tint},${b.alpha * 0.6})`;
+      ctx.fillRect(b.x, b.y, b.size, b.size);
+    }
+  };
+
+  const apply = () => { stop(); resize(); reduced.matches ? paintStatic() : start(); };
+
+  apply();
+  addEventListener('resize', apply, { passive: true });
+  reduced.addEventListener('change', apply);
+  // No point animating a background nobody is looking at.
+  document.addEventListener('visibilitychange', () => {
+    document.hidden ? stop() : (reduced.matches || start());
+  });
+})();
+</script>
+
+</body>
+</html>

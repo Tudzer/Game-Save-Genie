@@ -1,0 +1,33 @@
+# Static hosting for docs/ — the same directory GitHub Pages serves.
+#
+# Railway injects PORT and expects the process to bind it, so this does not
+# use Caddy's default :80.
+:{$PORT:8080} {
+	root * /srv
+	file_server
+	encode zstd gzip
+
+	# The page deliberately loads nothing from another host. This turns that
+	# from a convention into something the browser enforces: no fonts, no
+	# analytics, no CDN can be added without this failing loudly first.
+	# 'unsafe-inline' is required because the CSS and the ~40 lines of JS are
+	# inline in the single HTML file; there is no user input anywhere on the
+	# page for it to protect.
+	header {
+		Content-Security-Policy "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+	}
+
+	# Long cache for the generated images, short for the page itself so a
+	# redeploy is visible immediately.
+	#
+	# Matched on the request path, not the file served: requests arrive as "/"
+	# and Caddy resolves index.html internally, so a `/index.html` matcher
+	# never fires and the page ships with no cache header at all.
+	@assets path /assets/*
+	@page not path /assets/*
+	header @assets Cache-Control "public, max-age=604800"
+	header @page Cache-Control "public, max-age=300, must-revalidate"
+}
