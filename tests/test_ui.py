@@ -188,6 +188,120 @@ def test_a_stale_cloud_listing_cannot_overwrite_the_current_selection(seeded: Pa
     _drive(seeded, body)
 
 
+class _RunningWatcher:
+    """GameWatcher stand-in reporting the game as currently running."""
+
+    def __init__(self, games: object, **kwargs: object) -> None:
+        pass
+
+    def prime(self) -> None:
+        pass
+
+    def is_running(self, game_id: str) -> bool:
+        return True
+
+    def running_process_info(self, game_id: str) -> None:
+        return None
+
+
+def test_restore_refuses_while_the_game_is_running(
+    seeded: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`gsg pull` refuses to restore under a live game. The dashboard must
+    refuse too — a front end that skips this is more dangerous than the CLI.
+
+    Writing save files under a running process loses whatever the game
+    flushes on exit, and can leave a half-applied tree.
+    """
+    monkeypatch.setattr("game_save_genie.cli.GameWatcher", _RunningWatcher)
+    save = tmp_path / "saves" / "hero.srm"
+    save.write_bytes(b"live-session")
+
+    async def body(app: GameSaveGenieApp, pilot: Any) -> None:
+        table = app.query_one("#versions", DataTable)
+        table.move_cursor(row=len(app.rows) - 1)
+        await pilot.pause(0.2)
+        await pilot.press("r")
+        await pilot.pause(0.3)
+        await pilot.press("y")
+        await _wait_idle(app, pilot)
+
+    _drive(seeded, body)
+    assert save.read_bytes() == b"live-session", "restored over a running game"
+
+
+def test_restore_proceeds_when_the_game_is_not_running(
+    seeded: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard must not block the normal case."""
+    monkeypatch.setattr("game_save_genie.cli.GameWatcher", _IdleWatcherStub)
+    save = tmp_path / "saves" / "hero.srm"
+
+    async def body(app: GameSaveGenieApp, pilot: Any) -> None:
+        table = app.query_one("#versions", DataTable)
+        table.move_cursor(row=len(app.rows) - 1)
+        await pilot.pause(0.2)
+        await pilot.press("r")
+        await pilot.pause(0.3)
+        await pilot.press("y")
+        await _wait_idle(app, pilot)
+
+    _drive(seeded, body)
+    assert save.read_bytes() == b"level-50"
+
+
+class _IdleWatcherStub(_RunningWatcher):
+    def is_running(self, game_id: str) -> bool:
+        return False
+
+
+def test_a_failed_cloud_listing_does_not_kill_the_dashboard(
+    seeded: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only RuntimeError was caught, but resolving rclone can raise
+    ConnectionError/OSError — which tore the whole app down on an offline box."""
+
+    def boom(*a: object, **k: object) -> None:
+        raise ConnectionError("network is unreachable")
+
+    monkeypatch.setattr("game_save_genie.cloud.get_rclone_path", boom)
+    monkeypatch.setattr(
+        "game_save_genie.cli._cloud_target", lambda g, c: "gdrive:game-save-genie"
+    )
+    monkeypatch.setattr("game_save_genie.cli._effective_remote", lambda g, c: "gdrive")
+
+    async def body(app: GameSaveGenieApp, pilot: Any) -> None:
+        await pilot.press("c")
+        await pilot.pause(CLOUD_DEBOUNCE + 0.8)
+        assert app.is_running, "the dashboard died on a cloud listing error"
+        assert app.rows == []
+
+    _drive(seeded, body)
+
+
+def test_refresh_keeps_the_selected_game(seeded: Path, tmp_path: Path) -> None:
+    """Refresh runs after every job; losing the cursor would silently retarget
+    the next restore at a game the user never chose."""
+    cfg = seeded
+    saves2 = tmp_path / "saves2"
+    saves2.mkdir()
+    (saves2 / "b.dat").write_bytes(b"y")
+    runner.invoke(cli_app, ["--config", str(cfg), "add", "Second Game", "--path", str(saves2)])
+
+    async def body(app: GameSaveGenieApp, pilot: Any) -> None:
+        table = app.query_one("#games", DataTable)
+        table.move_cursor(row=1)
+        await pilot.pause(0.2)
+        chosen = app._selected_game()
+        assert chosen is not None
+        app.action_refresh()
+        await pilot.pause(0.2)
+        still = app._selected_game()
+        assert still is not None and still.id == chosen.id
+
+    _drive(cfg, body)
+
+
 def test_restore_asks_before_touching_save_files(seeded: Path) -> None:
     """The whole point of the picker is one keypress from a restore, so the
     confirmation is what stands between a stray 'r' and overwritten saves."""

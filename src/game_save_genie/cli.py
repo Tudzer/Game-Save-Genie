@@ -99,19 +99,34 @@ def main(
         # dashboard. The Windows Start Menu shortcut runs a bare `gsg`, so
         # this is what someone sees when they launch the app by clicking it —
         # a wall of command-line help was the wrong answer to that.
-        if (
-            not _cloud_configured(config)
-            and sys.stdin.isatty()
-            and _run_setup_wizard(ctx)
-        ):
-            console.print(
-                "\n[green]Setup complete![/green] Run [bold]gsg auto[/bold] to start "
-                "automatic backup."
-            )
+        # The wizard's outcome is terminal for this invocation either way. A
+        # declined or failed setup used to fall through, and the full-screen
+        # dashboard covered the explanation before it could be read — leaving
+        # someone looking at a professional-looking app that backs up nothing.
+        if not _cloud_configured(config) and _is_interactive():
+            if _run_setup_wizard(ctx):
+                console.print(
+                    "\n[green]Setup complete![/green] Run [bold]gsg auto[/bold] to start "
+                    "automatic backup, or [bold]gsg[/bold] to open the dashboard."
+                )
+            else:
+                console.print(
+                    "\n[yellow]Cloud storage is not set up, so nothing is being backed "
+                    "up yet.[/yellow] [dim]Run 'gsg' again when you are ready.[/dim]"
+                )
             return
         if _open_dashboard(config):
             return
         console.print(ctx.get_help())
+
+
+def _is_interactive() -> bool:
+    """Whether there is a human at a terminal to prompt.
+
+    A named seam so the entry point's branches are testable — it is the code
+    path the Start Menu shortcut takes, so it is worth pinning down.
+    """
+    return sys.stdin.isatty()
 
 
 def _dashboard_available() -> bool:
@@ -128,18 +143,34 @@ def _dashboard_available() -> bool:
 
 
 def _open_dashboard(config_path: Path | None) -> bool:
-    """Run the dashboard. Returns False if it could not be opened at all.
+    """Run the dashboard. Returns False if it could not be opened or crashed.
 
     A False return is a signal to fall back to help, never an error — a bare
-    `gsg` in a pipe or on a machine without Textual must still do something
-    sensible.
+    `gsg` in a pipe, on a machine without Textual, or after a dashboard that
+    died on startup must still do something sensible.
     """
     if not _dashboard_available():
         return False
     from . import ui
 
-    ui.run(config_path)
-    return True
+    # Textual owns the terminal for the duration, so nothing else may write to
+    # it. The root logger's console handler otherwise paints over the running
+    # app — "Downloading rclone..." straight across the layout on first run.
+    # FileHandler subclasses StreamHandler, so it must be excluded explicitly —
+    # the file log should keep recording while the dashboard is up.
+    root = logging.getLogger()
+    detached = [
+        h
+        for h in root.handlers
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+    ]
+    for handler in detached:
+        root.removeHandler(handler)
+    try:
+        return ui.run(config_path)
+    finally:
+        for handler in detached:
+            root.addHandler(handler)
 
 
 def _now_label() -> str:
@@ -633,6 +664,9 @@ def restore(
     no_safety: bool = typer.Option(
         False, "--no-safety", help="Skip the pre-restore safety backup (not recommended)"
     ),
+    force: bool = typer.Option(
+        False, "--force", help="Restore even if the game looks like it is running"
+    ),
 ) -> None:
     """Restore a save version for a game."""
     config_path = ctx.obj.get("config_path")
@@ -658,10 +692,35 @@ def restore(
         return
 
     config = load_config(config_path)
-    ok, message = restore_local_version(game, version, config, db, config_path, no_safety)
+    ok, message = restore_local_version(
+        game, version, config, db, config_path, no_safety, force=force
+    )
     console.print(f"[{'green' if ok else 'red'}]{message}[/]")
     if not ok:
         raise typer.Exit(1)
+
+
+def _refuse_if_running(game: Game, force: bool) -> str | None:
+    """Why a restore must not proceed right now, or None if it may.
+
+    Writing save files underneath a live game loses whatever that process
+    flushes on exit, and can leave a half-applied tree. This costs one
+    process-table scan, which is why it lives on the restore path only — but
+    EVERY restore path has to take it. A front end that skips this check is
+    strictly more dangerous than the CLI, however nice it looks.
+    """
+    if force:
+        return None
+    probe = GameWatcher([game])
+    probe.prime()
+    if not probe.is_running(game.id):
+        return None
+    info = probe.running_process_info(game.id)
+    matched = f" (matched: {info.exe or info.name})" if info else ""
+    return (
+        f"{game.title} is running{matched} — close it and try again. "
+        f"Restoring under a live game loses whatever it writes on exit."
+    )
 
 
 def restore_local_version(
@@ -671,6 +730,7 @@ def restore_local_version(
     db: Database,
     config_path: Path | None,
     no_safety: bool = False,
+    force: bool = False,
 ) -> tuple[bool, str]:
     """Verify, safety-backup, and apply a local snapshot.
 
@@ -678,6 +738,10 @@ def restore_local_version(
     so a non-CLI caller (the TUI) runs this exact code path rather than a
     reimplementation of it — the safety rules must not have two versions.
     """
+    blocked = _refuse_if_running(game, force)
+    if blocked:
+        return False, blocked
+
     ludusavi_path = None if game.custom else get_ludusavi_path(config_path)
 
     # Verify and stage the snapshot BEFORE touching anything on disk.
@@ -914,7 +978,7 @@ def pull(
             )
             continue
         if _apply_cloud_version(
-            game, config, db, rclone_path, ludusavi_path, target_version
+            game, config, db, rclone_path, ludusavi_path, target_version, force=force
         ):
             pulled += 1
             if version_id and cloud_latest and cloud_latest > target_version:
@@ -2216,6 +2280,7 @@ def _apply_cloud_version(
     rclone_path: Path,
     ludusavi_path: Path | None,
     version_id: str,
+    force: bool = False,
 ) -> bool:
     """Download, verify, remap, and restore one cloud version.
 
@@ -2226,6 +2291,11 @@ def _apply_cloud_version(
     The applied cloud version is recorded in sync_state so automatic
     restore never re-applies it.
     """
+    blocked = _refuse_if_running(game, force)
+    if blocked:
+        console.print(f"[yellow]{blocked}[/yellow]")
+        return False
+
     remote_name = _effective_remote(game, config)
     if not remote_name:
         return False
