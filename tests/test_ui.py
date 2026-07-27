@@ -13,11 +13,17 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 import pytest
+from textual.coordinate import Coordinate
 from textual.widgets import DataTable
 from typer.testing import CliRunner
 
 from game_save_genie.cli import app as cli_app
-from game_save_genie.ui import GameSaveGenieApp, _format_version_id
+from game_save_genie.ui import (
+    CLOUD_DEBOUNCE,
+    GameSaveGenieApp,
+    VersionRow,
+    _format_version_id,
+)
 
 runner = CliRunner()
 T = TypeVar("T")
@@ -98,13 +104,86 @@ def test_cloud_toggle_is_graceful_without_a_remote(seeded: Path) -> None:
 
     async def body(app: GameSaveGenieApp, pilot: Any) -> None:
         await pilot.press("c")
-        await pilot.pause(0.3)
         assert app.source == "cloud"
+        # Nothing is selectable the instant we switch — the local rows must
+        # not stay live behind the "loading" placeholder.
         assert app.rows == []
-        # ...and switching back restores the local list.
+        assert app._selected_row() is None
+
+        await pilot.pause(CLOUD_DEBOUNCE + 0.6)  # past the debounce and the listing
+        assert app.rows == []
+
+        # ...and switching back restores the local list immediately.
         await pilot.press("c")
-        await pilot.pause(0.3)
+        await pilot.pause(0.2)
         assert len(app.rows) == 2
+
+    _drive(seeded, body)
+
+
+def test_an_empty_versions_pane_explains_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A blank panel reads as a broken program. It must say why it is empty
+    and which key changes that."""
+    monkeypatch.setattr("game_save_genie.cli.get_data_dir", lambda: tmp_path / "data")
+    monkeypatch.setattr("game_save_genie.ui.get_data_dir", lambda: tmp_path / "data")
+    cfg = tmp_path / "c.yaml"
+    saves = tmp_path / "saves"
+    saves.mkdir()
+    (saves / "s.dat").write_bytes(b"x")
+    runner.invoke(cli_app, ["--config", str(cfg), "config", "--backup-dir", str(tmp_path / "bk")])
+    runner.invoke(cli_app, ["--config", str(cfg), "add", "Nothing Yet", "--path", str(saves)])
+
+    async def body(app: GameSaveGenieApp, pilot: Any) -> None:
+        table = app.query_one("#versions", DataTable)
+        assert app.rows == []
+        # One placeholder row, carrying guidance rather than nothing at all.
+        assert table.row_count == 1
+        cell = str(table.get_cell_at(Coordinate(0, 0)))
+        assert "press" in cell.lower()
+
+    _drive(cfg, body)
+
+
+def test_navigation_does_not_fire_a_cloud_listing_per_keypress(seeded: Path) -> None:
+    """Arrowing down the games list used to launch one rclone process per row
+    and log a line for each, burying everything else."""
+    calls: list[str] = []
+
+    async def body(app: GameSaveGenieApp, pilot: Any) -> None:
+        original = app._load_cloud_versions
+
+        def spy(game: Any, token: int) -> None:
+            calls.append(game.id)
+            original(game, token)
+
+        app._load_cloud_versions = spy  # type: ignore[assignment]
+        await pilot.press("c")
+        # Move around faster than the debounce window.
+        for _ in range(4):
+            await pilot.press("down")
+            await pilot.pause(0.02)
+        await pilot.pause(CLOUD_DEBOUNCE + 0.5)
+        assert len(calls) <= 1, f"debounce failed: {len(calls)} listings fired"
+
+    _drive(seeded, body)
+
+
+def test_a_stale_cloud_listing_cannot_overwrite_the_current_selection(seeded: Path) -> None:
+    """A slow listing landing late must not paint one game's versions under
+    another game's name."""
+
+    async def body(app: GameSaveGenieApp, pilot: Any) -> None:
+        before = list(app.rows)
+        stale = app._cloud_token
+        app._cloud_token += 1  # the selection has moved on since that request
+        arriving = [VersionRow("v1", "when", "1 B", "1", "cloud", None)]
+
+        app._set_cloud_rows(stale, arriving, "empty")
+        assert app.rows == before, "a stale listing overwrote the current rows"
+
+        # The same payload with a current token is accepted.
+        app._set_cloud_rows(app._cloud_token, arriving, "empty")
+        assert app.rows == arriving
 
     _drive(seeded, body)
 

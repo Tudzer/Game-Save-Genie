@@ -10,7 +10,7 @@ Copying a timestamp between two commands at the exact moment you have just
 lost progress is the worst possible time to ask someone to be careful. Here
 you arrow onto the version you want and press a key.
 
-Two rules this module holds to:
+Three rules this module holds to:
 
 * **No duplicated safety logic.** Backup and restore call the same functions
   the CLI does (`_run_backup`, `restore_local_version`, `_apply_cloud_version`),
@@ -18,8 +18,10 @@ Two rules this module holds to:
   game rule cannot drift between the two front ends.
 * **Never block the UI thread.** Every rclone or Ludusavi call happens in a
   worker thread. Those helpers print to a Rich console bound to stdout, so
-  workers capture stdout and forward it to the log pane instead of letting it
-  tear through the layout.
+  workers capture stdout and forward it to the activity pane instead of
+  letting it tear through the layout.
+* **Empty is never blank.** A pane with nothing in it says why, and what key
+  would change that. A blank panel reads as a broken program.
 """
 
 from __future__ import annotations
@@ -32,9 +34,10 @@ from typing import Any, ClassVar
 
 from textual import on, work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Header, Label, RichLog, Static
+from textual.timer import Timer
+from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
 from .config import get_data_dir, load_config, load_games
 from .database import Database
@@ -42,6 +45,9 @@ from .models import Game, SaveVersion
 
 LOCAL = "local"
 CLOUD = "cloud"
+
+# Arrowing through the games list must not fire a network call per keypress.
+CLOUD_DEBOUNCE = 0.4
 
 
 @dataclass
@@ -67,10 +73,12 @@ class ConfirmScreen(ModalScreen[bool]):
         self._detail = detail
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="confirm-box"):
-            yield Label(self._question, id="confirm-question")
-            yield Static(self._detail, id="confirm-detail")
-            yield Label("[b]y[/b] confirm     [b]n[/b] / Esc cancel", id="confirm-keys")
+        with Horizontal(id="confirm-box"):
+            yield Static(
+                f"[b]{self._question}[/b]\n\n{self._detail}\n\n"
+                "[b]y[/b] confirm     [b]n[/b] or Esc cancel",
+                id="confirm-text",
+            )
 
     def on_key(self, event: Any) -> None:
         if event.key == "y":
@@ -90,18 +98,16 @@ class GameSaveGenieApp(App[None]):
     CSS = """
     Screen { layout: vertical; }
     #tables { height: 1fr; }
-    #games { width: 45%; border: solid $panel; }
-    #versions { width: 1fr; border: solid $panel; }
-    #log { height: 30%; border: solid $panel; }
+    #games { width: 48%; border: round $primary; padding: 0 1; }
+    #versions { width: 1fr; border: round $primary; padding: 0 1; }
+    #log { height: 9; border: round $panel; padding: 0 1; }
     DataTable { height: 1fr; }
+    ConfirmScreen { align: center middle; }
     #confirm-box {
-        width: 70; height: auto; padding: 1 2;
+        width: 66; height: auto; padding: 1 2;
         background: $surface; border: thick $warning;
     }
-    #confirm-question { text-style: bold; width: 100%; }
-    #confirm-detail { margin: 1 0; width: 100%; }
-    #confirm-keys { width: 100%; }
-    ConfirmScreen { align: center middle; }
+    #confirm-text { width: 100%; }
     """
 
     BINDINGS: ClassVar[list[Any]] = [
@@ -119,6 +125,11 @@ class GameSaveGenieApp(App[None]):
         self.source = LOCAL
         self.rows: list[VersionRow] = []
         self._busy = False
+        # Guards against a slow cloud listing landing after the selection has
+        # already moved on — otherwise one game's versions appear under
+        # another's name.
+        self._cloud_token = 0
+        self._debounce: Timer | None = None
 
     # ---------------------------------------------------------------- layout
 
@@ -127,17 +138,25 @@ class GameSaveGenieApp(App[None]):
         with Horizontal(id="tables"):
             yield DataTable(id="games")
             yield DataTable(id="versions")
-        yield RichLog(id="log", highlight=True, markup=True, wrap=True)
+        # highlight=False: the auto-highlighter colours stray digits inside
+        # game titles, which reads as meaningful and is not.
+        yield RichLog(id="log", highlight=False, markup=True, wrap=True)
         yield Footer()
 
     def on_mount(self) -> None:
         games = self.query_one("#games", DataTable)
         games.cursor_type = "row"
-        games.add_columns("Game", "Versions", "Last backup", "Cloud target")
+        games.zebra_stripes = True
+        games.add_columns("Game", "Backups", "Last backup", "Cloud target")
+        games.border_title = "Games"
+
         versions = self.query_one("#versions", DataTable)
         versions.cursor_type = "row"
+        versions.zebra_stripes = True
         versions.add_columns("Version", "When", "Size", "Files", "Cloud")
-        self.log_line("[dim]Loading tracked games…[/dim]")
+        versions.border_title = "Versions"
+
+        self.query_one("#log", RichLog).border_title = "Activity"
         self.action_refresh()
 
     # ------------------------------------------------------------------ data
@@ -170,17 +189,19 @@ class GameSaveGenieApp(App[None]):
         table.clear()
         for game in self.games:
             versions = [v for v in db.get_versions(game.id) if v.origin != "safety"]
-            last = versions[0].created_at.strftime("%Y-%m-%d %H:%M") if versions else "never"
             table.add_row(
                 game.title,
                 str(len(versions)),
-                last if versions else "[yellow]never[/yellow]",
-                _cloud_target(game, config) or "off",
+                versions[0].created_at.strftime("%Y-%m-%d %H:%M")
+                if versions
+                else "[yellow]never[/yellow]",
+                _cloud_target(game, config) or "[dim]off[/dim]",
             )
+        table.border_title = f"Games ({len(self.games)})"
+
         if not self.games:
-            self.log_line("[yellow]No games tracked yet. Run 'gsg scan' or 'gsg add'.[/yellow]")
+            self._render_versions(placeholder="No games tracked. Run 'gsg scan', then 'gsg add'.")
             return
-        self.sub_title = f"{len(self.games)} game(s) — {self.source} versions"
         self.load_versions()
 
     @on(DataTable.RowHighlighted, "#games")
@@ -189,18 +210,45 @@ class GameSaveGenieApp(App[None]):
 
     def action_toggle_source(self) -> None:
         self.source = CLOUD if self.source == LOCAL else LOCAL
-        self.sub_title = f"{len(self.games)} game(s) — {self.source} versions"
         self.load_versions()
 
     def load_versions(self) -> None:
+        """Refresh the versions pane for whatever game is selected.
+
+        Local reads are a SQLite query, so they happen immediately. Cloud
+        listings are debounced: holding an arrow key down would otherwise
+        launch one rclone process per row.
+        """
+        if self._debounce is not None:
+            self._debounce.stop()
+            self._debounce = None
+
         game = self._selected_game()
         if game is None:
             return
+        # Any in-flight cloud result is now stale.
+        self._cloud_token += 1
+
         if self.source == LOCAL:
             self._show_local_versions(game)
-        else:
-            # Cloud listing is a network round-trip; never on the UI thread.
-            self._load_cloud_versions(game)
+            return
+
+        self._set_versions_title(game, "cloud")
+        # Drop the previous rows before showing the placeholder: leaving the
+        # local list in `self.rows` would let `r` restore a local snapshot
+        # while the pane says it is loading cloud versions.
+        self.rows = []
+        self._render_versions(placeholder="Loading from cloud…")
+        token = self._cloud_token
+        self._debounce = self.set_timer(
+            CLOUD_DEBOUNCE, lambda: self._load_cloud_versions(game, token)
+        )
+
+    def _set_versions_title(self, game: Game | None, source: str) -> None:
+        table = self.query_one("#versions", DataTable)
+        table.border_title = (
+            f"Versions — {game.title} · {source}" if game else "Versions"
+        )
 
     def _show_local_versions(self, game: Game) -> None:
         from .cli import _human_size, _sync_display
@@ -218,11 +266,20 @@ class GameSaveGenieApp(App[None]):
             )
             for v in db.get_versions(game.id)
         ]
-        self._render_versions()
+        self._set_versions_title(game, "local")
+        self._render_versions(
+            placeholder=None
+            if self.rows
+            else "No backups yet — press [b]b[/b] to create one."
+        )
 
-    def _render_versions(self) -> None:
+    def _render_versions(self, placeholder: str | None = None) -> None:
+        """Draw the versions table, or an explanation of why it is empty."""
         table = self.query_one("#versions", DataTable)
         table.clear()
+        if placeholder is not None:
+            table.add_row(f"[dim]{placeholder}[/dim]", "", "", "", "")
+            return
         for row in self.rows:
             table.add_row(row.version_id, row.when, row.size, row.files, row.state)
 
@@ -249,14 +306,16 @@ class GameSaveGenieApp(App[None]):
             self.action_refresh()
 
     @work(thread=True, exclusive=True, group="cloud")
-    def _load_cloud_versions(self, game: Game) -> None:
+    def _load_cloud_versions(self, game: Game, token: int) -> None:
         from .cli import _cloud_target, _effective_remote
         from .cloud import get_rclone_path, list_remote_version_entries
 
         config = load_config(self.config_path)
         remote = _effective_remote(game, config)
         if not _cloud_target(game, config) or not remote:
-            self.call_from_thread(self._set_cloud_rows, [], "No cloud configured for this game.")
+            self.call_from_thread(
+                self._set_cloud_rows, token, [], "No cloud configured for this game."
+            )
             return
         try:
             (entries, _out) = self._capture(
@@ -265,7 +324,12 @@ class GameSaveGenieApp(App[None]):
                 )
             )
         except RuntimeError as exc:
-            self.call_from_thread(self._set_cloud_rows, [], f"[red]Cloud listing failed: {exc}[/red]")
+            # Errors DO belong in the activity log — unlike routine listings,
+            # which used to log a line per keypress and drowned everything.
+            self.call_from_thread(self.log_line, f"[red]Cloud listing failed: {exc}[/red]")
+            self.call_from_thread(
+                self._set_cloud_rows, token, [], "Could not reach the cloud (see Activity)."
+            )
             return
         rows = [
             VersionRow(
@@ -280,14 +344,17 @@ class GameSaveGenieApp(App[None]):
         ]
         rows.reverse()
         self.call_from_thread(
-            self._set_cloud_rows, rows, f"[dim]{len(rows)} cloud version(s) for {game.title}[/dim]"
+            self._set_cloud_rows,
+            token,
+            rows,
+            "No cloud versions yet — press [b]b[/b] to back up and upload.",
         )
 
-    def _set_cloud_rows(self, rows: list[VersionRow], message: str) -> None:
+    def _set_cloud_rows(self, token: int, rows: list[VersionRow], empty_note: str) -> None:
+        if token != self._cloud_token:
+            return  # the selection moved on while this listing was in flight
         self.rows = rows
-        self._render_versions()
-        if message:
-            self.log_line(message)
+        self._render_versions(placeholder=None if rows else empty_note)
 
     @work(thread=True, exclusive=True, group="job")
     def _run_backup_job(self, game: Game) -> None:
@@ -303,18 +370,18 @@ class GameSaveGenieApp(App[None]):
             if not result.success:
                 return False, f"[red]{result.message}[/red]"
             if result.version is None:
-                return True, f"[dim]{result.message}[/dim]"
+                return True, f"[dim]{game.title}: {result.message}[/dim]"
             uploaded = _cloud_upload(self.config_path, game, result.version, dry_run=False)
             if not uploaded:
                 return False, f"[red]{game.title}: backed up locally, but the upload failed.[/red]"
             return True, f"[green]{result.message}[/green]"
 
         try:
-            (ok_message, output) = self._capture(job)
+            (outcome, output) = self._capture(job)
         except Exception as exc:  # pragma: no cover - defensive
             self.call_from_thread(self._finish, f"[red]Backup crashed: {exc}[/red]", "", False)
             return
-        _ok, message = ok_message
+        _ok, message = outcome
         self.call_from_thread(self._finish, message, output, True)
 
     @work(thread=True, exclusive=True, group="job")
@@ -371,20 +438,26 @@ class GameSaveGenieApp(App[None]):
     async def _confirm_restore(self) -> None:
         game = self._selected_game()
         row = self._selected_row()
-        if game is None or row is None or self._reject_if_busy():
+        if game is None or self._reject_if_busy():
+            return
+        if row is None:
+            self.log_line(
+                "[yellow]No version selected. Pick one on the right, "
+                "or press b to create a backup first.[/yellow]"
+            )
             return
         source = "local snapshot" if row.local is not None else "cloud version"
         confirmed = await self.push_screen_wait(
             ConfirmScreen(
                 f"Restore {game.title}?",
                 f"This overwrites the current save files with {source} "
-                f"{row.version_id} ({row.when}).\n\n"
-                f"A safety backup of your current saves is taken first, so this "
-                f"can be undone.",
+                f"{row.version_id} ({row.when}).\n"
+                f"A safety backup of your current saves is taken first, "
+                f"so this can be undone.",
             )
         )
         if not confirmed:
-            self.log_line("[dim]Restore cancelled.[/dim]")
+            self.log_line("[dim]Restore cancelled — nothing changed.[/dim]")
             return
         self._busy = True
         self.log_line(f"[cyan]Restoring {game.title} from {row.version_id}…[/cyan]")
