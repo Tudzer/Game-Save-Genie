@@ -11,7 +11,6 @@ from platformdirs import user_config_dir, user_data_dir
 
 from .models import CloudProvider, Game, SyncConfig
 
-
 APP_NAME = "Game Save Genie"
 APP_AUTHOR = "game-save-genie"
 DEFAULT_CONFIG_FILE = "config.yaml"
@@ -109,13 +108,13 @@ def _default_config() -> SyncConfig:
 
 def _build_config(data: dict[str, Any]) -> SyncConfig:
     """Build a SyncConfig from raw YAML data."""
-    if "backup_dir" in data and data["backup_dir"]:
+    if data.get("backup_dir"):
         data["backup_dir"] = Path(data["backup_dir"]).expanduser()
-    if "ludusavi_path" in data and data["ludusavi_path"]:
+    if data.get("ludusavi_path"):
         data["ludusavi_path"] = Path(data["ludusavi_path"]).expanduser()
-    if "rclone_path" in data and data["rclone_path"]:
+    if data.get("rclone_path"):
         data["rclone_path"] = Path(data["rclone_path"]).expanduser()
-    if "cloud_provider" in data and data["cloud_provider"]:
+    if data.get("cloud_provider"):
         data["cloud_provider"] = CloudProvider(data["cloud_provider"])
     return SyncConfig.model_validate(data)
 

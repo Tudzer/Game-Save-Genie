@@ -8,7 +8,6 @@ from pathlib import Path
 
 from .models import Platform, SaveVersion
 
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS save_versions (
     id TEXT PRIMARY KEY,

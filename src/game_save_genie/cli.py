@@ -5,16 +5,16 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Optional
+from typing import IO
 
 import typer
 import yaml
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__
+from . import __version__, custom
 from .archive import safe_extract_zip, sha256_file, zip_directory
 from .cloud import (
     _remote_path,
@@ -36,7 +36,6 @@ from .config import (
     save_config,
     save_games,
 )
-from . import custom
 from .database import Database
 from .ludusavi import (
     backup_game,
@@ -81,7 +80,7 @@ def _version_callback(value: bool) -> None:
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    config: Optional[Path] = typer.Option(None, "--config", help="Path to config file"),
+    config: Path | None = typer.Option(None, "--config", help="Path to config file"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     version: bool = typer.Option(
         False, "--version", callback=_version_callback, is_eager=True,
@@ -95,17 +94,29 @@ def main(
 
     if ctx.invoked_subcommand is None:
         # Bare `gsg`: first run gets the guided setup; otherwise show help.
-        if not _cloud_configured(config) and sys.stdin.isatty():
-            if _run_setup_wizard(ctx):
-                console.print(
-                    "\n[green]Setup complete![/green] Run [bold]gsg auto[/bold] to start "
-                    "automatic backup."
-                )
-                return
+        if (
+            not _cloud_configured(config)
+            and sys.stdin.isatty()
+            and _run_setup_wizard(ctx)
+        ):
+            console.print(
+                "\n[green]Setup complete![/green] Run [bold]gsg auto[/bold] to start "
+                "automatic backup."
+            )
+            return
         console.print(ctx.get_help())
 
 
-def _cloud_configured(config_path: Optional[Path]) -> bool:
+def _now_label() -> str:
+    """Local wall-clock time for a human-readable backup label.
+
+    Aware-but-local on purpose: the label is for reading, while a version's
+    ``created_at`` stays UTC.
+    """
+    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _cloud_configured(config_path: Path | None) -> bool:
     config = load_config(config_path)
     return bool(config.rclone_remote_name and config.cloud_provider)
 
@@ -113,7 +124,7 @@ def _cloud_configured(config_path: Optional[Path]) -> bool:
 @app.command()
 def init(
     ctx: typer.Context,
-    backup_dir: Optional[Path] = typer.Option(None, help="Local backup directory"),
+    backup_dir: Path | None = typer.Option(None, help="Local backup directory"),
 ) -> None:
     """Initialize Game Save Genie configuration."""
     config_path = ctx.obj.get("config_path") or get_config_path()
@@ -202,15 +213,15 @@ def scan(
 def add(
     ctx: typer.Context,
     title: str = typer.Argument(..., help="Game title"),
-    executable: Optional[str] = typer.Option(None, "--exe", help="Executable name to watch"),
+    executable: str | None = typer.Option(None, "--exe", help="Executable name to watch"),
     paths: list[Path] = typer.Option(
         [], "--path",
         help="Save folder or file to back up directly, bypassing Ludusavi "
         "(repeatable; for emulators / games Ludusavi doesn't know)",
     ),
     platform: Platform = typer.Option(_current_platform(), "--platform", help="Platform"),
-    cloud: Optional[CloudProvider] = typer.Option(None, "--cloud", help="Cloud provider"),
-    remote_path: Optional[str] = typer.Option(None, "--remote", help="Remote path/remote name"),
+    cloud: CloudProvider | None = typer.Option(None, "--cloud", help="Cloud provider"),
+    remote_path: str | None = typer.Option(None, "--remote", help="Remote path/remote name"),
     no_auto_sync: bool = typer.Option(False, "--no-auto-sync", help="Disable auto-sync"),
 ) -> None:
     """Add a game to track.
@@ -389,8 +400,8 @@ def status(ctx: typer.Context) -> None:
 @app.command()
 def backup(
     ctx: typer.Context,
-    game_id: Optional[str] = typer.Argument(None, help="Game ID to backup (omit for all)"),
-    label: Optional[str] = typer.Option(None, "--label", help="Backup label"),
+    game_id: str | None = typer.Argument(None, help="Game ID to backup (omit for all)"),
+    label: str | None = typer.Option(None, "--label", help="Backup label"),
     no_cloud: bool = typer.Option(False, "--no-cloud", help="Skip cloud upload"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would happen"),
 ) -> None:
@@ -438,7 +449,7 @@ def backup(
 def restore(
     ctx: typer.Context,
     game_id: str = typer.Argument(..., help="Game ID to restore"),
-    version_id: Optional[str] = typer.Option(None, "--version", help="Version ID (omit for latest)"),
+    version_id: str | None = typer.Option(None, "--version", help="Version ID (omit for latest)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would happen"),
     no_safety: bool = typer.Option(
         False, "--no-safety", help="Skip the pre-restore safety backup (not recommended)"
@@ -498,7 +509,7 @@ def restore(
 
 
 def _apply_staged_backup(
-    game: Game, staged_dir: Path, ludusavi_path: Optional[Path]
+    game: Game, staged_dir: Path, ludusavi_path: Path | None
 ) -> None:
     """Apply a staged backup tree to disk, dispatching by game type.
 
@@ -585,8 +596,8 @@ def cloud_list(
 @app.command()
 def pull(
     ctx: typer.Context,
-    game_id: Optional[str] = typer.Argument(None, help="Game ID to pull (omit with --all)"),
-    version_id: Optional[str] = typer.Option(
+    game_id: str | None = typer.Argument(None, help="Game ID to pull (omit with --all)"),
+    version_id: str | None = typer.Option(
         None, "--version", help="Cloud version ID (omit for latest; see 'gsg cloud-list')"
     ),
     all_games: bool = typer.Option(
@@ -670,7 +681,7 @@ def pull(
 
         remote_name = game.remote_path or config.rclone_remote_name
         assert remote_name is not None  # filtered above
-        cloud_latest: Optional[str] = None
+        cloud_latest: str | None = None
         if not (version_id and force):
             try:
                 cloud_ids = list_remote_versions(
@@ -751,7 +762,7 @@ def watch(ctx: typer.Context) -> None:
         console.print(f"[cyan]Game closed: {game.title}. Backing up...[/cyan]")
         result = _run_backup(
             game, config, db, ludusavi_path,
-            label=f"Auto-backup on {datetime.now()}", origin="auto",
+            label=f"Auto-backup on {_now_label()}", origin="auto",
         )
         console.print(f"{'[green]' if result.success else '[red]'}{result.message}[/]")
         if result.success and result.version and game.cloud_provider:
@@ -921,7 +932,7 @@ def auto(
         console.print(f"[cyan]Game closed: {game.title}. Backing up to cloud...[/cyan]")
         result = _run_backup(
             game, config, db, ludusavi_path,
-            label=f"Auto-backup on {datetime.now()}", origin="auto",
+            label=f"Auto-backup on {_now_label()}", origin="auto",
         )
         console.print(f"{'[green]' if result.success else '[red]'}{result.message}[/]")
         if result.success and result.version and result.files_changed > 0:
@@ -932,7 +943,7 @@ def auto(
         console.print(f"[cyan]Periodic backup: {game.title}...[/cyan]")
         result = _run_backup(
             game, config, db, ludusavi_path,
-            label=f"Periodic backup on {datetime.now()}", origin="auto",
+            label=f"Periodic backup on {_now_label()}", origin="auto",
         )
         if result.success and result.version and result.files_changed > 0:
             console.print(f"[green]{result.message}[/green]")
@@ -982,7 +993,7 @@ def _startup_vbs_path() -> Path:
     return startup_dir / "GameSaveGenie.vbs"
 
 
-def _find_gsg_exe() -> Optional[Path]:
+def _find_gsg_exe() -> Path | None:
     """Locate the gsg executable for autostart, or None."""
     if getattr(sys, "frozen", False):
         # Running as a PyInstaller bundle: this process IS the gsg binary.
@@ -1003,7 +1014,7 @@ def _find_gsg_exe() -> Optional[Path]:
     return None
 
 
-def _install_startup(config_path: Optional[Path] = None) -> None:
+def _install_startup(config_path: Path | None = None) -> None:
     """Install gsg auto to run hidden at logon via the user's Startup folder.
 
     A Startup-folder script needs no elevation and no console window.
@@ -1086,7 +1097,7 @@ def _systemd_escape(path: Path) -> str:
     return '"' + path.as_posix().replace("%", "%%") + '"'
 
 
-def _systemd_unit_content(gsg_path: Path, config_path: Optional[Path]) -> str:
+def _systemd_unit_content(gsg_path: Path, config_path: Path | None) -> str:
     """The systemd user unit that runs the watcher at login (pure, testable).
 
     Benign outcomes (lock already held, nothing to watch yet) exit 0 so
@@ -1114,7 +1125,7 @@ def _systemd_unit_content(gsg_path: Path, config_path: Optional[Path]) -> str:
     )
 
 
-def _install_systemd_unit(gsg_path: Path, config_path: Optional[Path]) -> None:
+def _install_systemd_unit(gsg_path: Path, config_path: Path | None) -> None:
     """Install and start the watcher as a systemd user service (Linux)."""
     import shutil
     import subprocess
@@ -1176,14 +1187,14 @@ def _uninstall_systemd_unit() -> None:
 @app.command(name="config")
 def config_cmd(
     ctx: typer.Context,
-    backup_dir: Optional[Path] = typer.Option(None, "--backup-dir", help="Set backup directory"),
-    max_versions: Optional[int] = typer.Option(None, "--max-versions", help="Max versions to keep"),
-    cloud_provider: Optional[CloudProvider] = typer.Option(None, "--cloud-provider", help="Default cloud provider"),
-    rclone_remote_name: Optional[str] = typer.Option(None, "--rclone-remote", help="Name of the rclone remote"),
-    remote_root: Optional[str] = typer.Option(None, "--remote-root", help="Remote root path or bucket"),
-    ludusavi_path: Optional[Path] = typer.Option(None, "--ludusavi", help="Path to ludusavi binary"),
-    rclone_path: Optional[Path] = typer.Option(None, "--rclone", help="Path to rclone binary"),
-    storage_limit: Optional[float] = typer.Option(
+    backup_dir: Path | None = typer.Option(None, "--backup-dir", help="Set backup directory"),
+    max_versions: int | None = typer.Option(None, "--max-versions", help="Max versions to keep"),
+    cloud_provider: CloudProvider | None = typer.Option(None, "--cloud-provider", help="Default cloud provider"),
+    rclone_remote_name: str | None = typer.Option(None, "--rclone-remote", help="Name of the rclone remote"),
+    remote_root: str | None = typer.Option(None, "--remote-root", help="Remote root path or bucket"),
+    ludusavi_path: Path | None = typer.Option(None, "--ludusavi", help="Path to ludusavi binary"),
+    rclone_path: Path | None = typer.Option(None, "--rclone", help="Path to rclone binary"),
+    storage_limit: float | None = typer.Option(
         None, "--storage-limit", help="Cloud storage limit in GB for usage warnings (0 = off)"
     ),
 ) -> None:
@@ -1555,7 +1566,7 @@ def _watchable_games(games: list[Game]) -> list[Game]:
     return watched
 
 
-def _acquire_instance_lock() -> Optional[IO[str]]:
+def _acquire_instance_lock() -> IO[str] | None:
     """Take an exclusive watcher lock; None if another instance holds it.
 
     The returned handle must stay open for the watcher's lifetime — the OS
@@ -1617,10 +1628,10 @@ def _run_backup(
     game: Game,
     config: SyncConfig,
     db: Database,
-    ludusavi_path: Optional[Path],
-    label: Optional[str] = None,
+    ludusavi_path: Path | None,
+    label: str | None = None,
     origin: str = "user",
-    protect_id: Optional[str] = None,
+    protect_id: str | None = None,
 ) -> BackupResult:
     if game.custom:
         previous = db.get_versions(game.id)
@@ -1648,7 +1659,7 @@ def _prune_old_versions(
     db: Database,
     game_id: str,
     max_versions: int,
-    protect_id: Optional[str] = None,
+    protect_id: str | None = None,
 ) -> None:
     if max_versions < 1:
         return
@@ -1673,7 +1684,7 @@ def _prune_old_versions(
         db.delete_version(old.id)
 
 
-def _materialize_version(version: SaveVersion, game: Game) -> Optional[Path]:
+def _materialize_version(version: SaveVersion, game: Game) -> Path | None:
     """Stage a version's Ludusavi backup structure for restore, verified.
 
     Returns a directory ready to hand to ``ludusavi restore --path``, or
@@ -1766,7 +1777,7 @@ def _reset_dir(path: Path) -> None:
 
 
 def _remember_executable(
-    game: Game, proc_info: ProcessInfo, config_path: Optional[Path]
+    game: Game, proc_info: ProcessInfo, config_path: Path | None
 ) -> None:
     """Persist the matched process name so future matches are exact, not fuzzy."""
     if game.executable_names or not proc_info.name:
@@ -1786,7 +1797,7 @@ def _cloud_newer_version(
     config: SyncConfig,
     db: Database,
     rclone_path: Path,
-) -> Optional[str]:
+) -> str | None:
     """Return the cloud's latest version id when it is strictly newer than
     anything this machine has produced or applied; None otherwise.
 
@@ -1817,7 +1828,7 @@ def _auto_restore_if_idle(
     config: SyncConfig,
     db: Database,
     rclone_path: Path,
-    ludusavi_path: Optional[Path],
+    ludusavi_path: Path | None,
 ) -> None:
     """Apply the latest cloud save when it is newer — ONLY for a game that is
     not currently running (callers guarantee that; restoring under a live
@@ -1835,7 +1846,7 @@ def _apply_cloud_version(
     config: SyncConfig,
     db: Database,
     rclone_path: Path,
-    ludusavi_path: Optional[Path],
+    ludusavi_path: Path | None,
     version_id: str,
 ) -> bool:
     """Download, verify, remap, and restore one cloud version.

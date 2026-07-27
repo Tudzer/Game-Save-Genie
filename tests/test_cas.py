@@ -133,7 +133,7 @@ def test_reconstruct_rejects_path_traversal(tmp_path: Path, evil_path: str) -> N
         "files": [{"path": evil_path, "sha256": "0" * 64, "size": 0}],
     }
     dest = tmp_path / "dest"
-    with pytest.raises(RuntimeError, match="Unsafe archive member|escapes destination"):
+    with pytest.raises(RuntimeError, match=r"Unsafe archive member|escapes destination"):
         cas.reconstruct(manifest, tmp_path / "blobs", dest)
     assert not (tmp_path / "escape.sav").exists()
 

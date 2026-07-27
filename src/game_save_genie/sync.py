@@ -15,7 +15,7 @@ def latest_version_id(version_ids: list[str]) -> str | None:
     """Return the newest version id, or ``None`` when the list is empty."""
     if not version_ids:
         return None
-    return sorted(version_ids)[-1]
+    return max(version_ids)
 
 
 def effective_local_latest(

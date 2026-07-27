@@ -182,7 +182,7 @@ def remap_paths(
         target_platform = _current_platform()
 
     remapped: list[GameSavePath] = []
-    for original, _mapped in mapping.get("games", {}).get(game.title, {}).get("files", {}).items():
+    for original in mapping.get("games", {}).get(game.title, {}).get("files", {}):
         original_path = Path(original)
         remapped_path = _remap_single_path(original_path, target_platform, game)
         is_wine = game.platform == Platform.LINUX and "pfx" in remapped_path.parts
@@ -226,7 +226,7 @@ def _remap_single_path(path: Path, target_platform: Platform, game: Game) -> Pat
     home = Path.home()
     if path_str.startswith("~/"):
         path_str = str(home / path_str[2:])
-    elif path_str.startswith("/home/") or path_str.startswith("/Users/"):
+    elif path_str.startswith(("/home/", "/Users/")):
         parts = Path(path_str).parts
         if len(parts) >= 3:
             path_str = str(home / Path(*parts[3:]))

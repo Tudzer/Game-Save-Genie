@@ -125,7 +125,8 @@ def backup_custom(
         local_path=game_backup_dir,
         size_bytes=total_bytes,
         file_count=file_count,
-        label=label or f"Backup on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        label=label
+        or f"Backup on {datetime.now(timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
         source_machine=_machine_id(),
         platform=game.platform,
         content_digest=digest,
