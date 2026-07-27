@@ -384,12 +384,11 @@ def ui_command(ctx: typer.Context) -> None:
     config_path = ctx.obj.get("config_path")
     # Asked for explicitly, so failures are errors here — unlike a bare `gsg`,
     # which quietly falls back to help.
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        console.print(
-            "[red]'gsg ui' needs an interactive terminal. "
-            "Use 'gsg status' / 'gsg versions' when piping output.[/red]"
-        )
-        raise typer.Exit(1)
+    #
+    # The import is checked BEFORE the terminal check so the two failures are
+    # distinguishable from a non-interactive shell. That is what lets the
+    # packaging CI assert that Textual really is inside the frozen exe: a
+    # bundle missing it reports the dependency, not the terminal.
     try:
         from . import ui
     except ImportError as exc:
@@ -398,6 +397,12 @@ def ui_command(ctx: typer.Context) -> None:
             "[dim]Install it with: pip install textual[/dim]"
         )
         raise typer.Exit(1) from exc
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        console.print(
+            "[red]'gsg ui' needs an interactive terminal. "
+            "Use 'gsg status' / 'gsg versions' when piping output.[/red]"
+        )
+        raise typer.Exit(1)
     ui.run(config_path)
 
 

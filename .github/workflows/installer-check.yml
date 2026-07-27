@@ -16,10 +16,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Build via the script rather than a duplicate command line: the two
+      # drifted once, and the released exe lost its icon and tray glyphs.
       - name: Build gsg.exe
+        shell: pwsh
         run: |
           pip install . pyinstaller
-          pyinstaller --onefile --console --clean --name gsg --distpath dist --workpath build --specpath build packaging/gsg_entry.py
+          .\packaging\build_exe.ps1
       - name: Ensure Inno Setup
         shell: pwsh
         run: |
@@ -37,6 +40,14 @@ jobs:
           $exe = "$env:LOCALAPPDATA\Programs\Game Save Genie\gsg.exe"
           if (-not (Test-Path $exe)) { throw "gsg.exe not installed" }
           & $exe --version
+          # The dashboard is what the Start Menu shortcut opens, so verify it
+          # survives freezing. Non-interactive here, so the expected answer is
+          # "needs an interactive terminal"; a missing-dependency message would
+          # mean Textual never made it into the bundle.
+          $out = & $exe ui 2>&1 | Out-String
+          if ($out -notmatch "interactive terminal") {
+            throw "gsg ui is broken in the installed exe: $out"
+          }
           $path = (Get-ItemProperty -Path "HKCU:\Environment" -Name Path).Path
           if ($path -notlike "*Game Save Genie*") { throw "install dir not added to user PATH" }
       - name: Silent uninstall + verify cleanup

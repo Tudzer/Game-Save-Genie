@@ -17,13 +17,22 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install . pyinstaller
+      # Build via the script, not a copy of its command line. When these
+      # drifted, the released exe shipped with no icon and no tray glyphs
+      # while the script had both.
       - name: Build gsg.exe
-        run: >
-          pyinstaller --onefile --console --clean --name gsg
-          --distpath dist --workpath build --specpath build
-          packaging/gsg_entry.py
+        shell: pwsh
+        run: .\packaging\build_exe.ps1
       - name: Smoke test
-        run: dist\gsg.exe --version
+        shell: pwsh
+        run: |
+          dist\gsg.exe --version
+          # Non-interactive, so this must report the terminal - reporting a
+          # missing dependency would mean Textual is not in the bundle.
+          $out = & dist\gsg.exe ui 2>&1 | Out-String
+          if ($out -notmatch "interactive terminal") {
+            throw "gsg ui is broken in the frozen exe: $out"
+          }
       - name: Ensure Inno Setup
         shell: pwsh
         run: |
