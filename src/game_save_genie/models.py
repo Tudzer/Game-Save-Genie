@@ -49,6 +49,11 @@ class Game(BaseModel):
     cloud_provider: CloudProvider | None = None
     remote_path: str | None = None
     custom: bool = False
+    # True when executable_names was learned by watching rather than given
+    # with --exe. A learned name is a fast path, not a narrowing rule: title
+    # matching stays active alongside it, so one bad guess cannot make a game
+    # permanently undetectable.
+    executables_learned: bool = False
 
     @field_validator("id")
     @classmethod
