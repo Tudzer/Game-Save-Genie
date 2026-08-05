@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,14 @@ def get_ludusavi_path(config_path: Path | None = None) -> Path:
     cfg = load_config(config_path)
     if cfg.ludusavi_path and cfg.ludusavi_path.exists():
         return cfg.ludusavi_path
+
+    # A Ludusavi the user installed themselves wins over one we fetch. This is
+    # what get_rclone_path already does, and it is the only route open to
+    # anyone upstream publishes no build for: ARM Linux and Intel macOS both
+    # have to build or package it themselves.
+    system_path = shutil.which("ludusavi")
+    if system_path:
+        return Path(system_path)
 
     binary_dir = get_default_binary_dir()
     binary_name = "ludusavi.exe" if os.name == "nt" else "ludusavi"
@@ -82,9 +91,48 @@ def download_ludusavi(target_dir: Path) -> Path:
     return binary_path
 
 
+_INSTALL_IT_YOURSELF = (
+    "Install Ludusavi yourself and gsg will use it: it checks PATH before "
+    "downloading anything. See https://github.com/mtkennerly/ludusavi"
+)
+
+
+def unsupported_architecture_reason() -> str | None:
+    """Why this machine cannot run an official Ludusavi build, or None.
+
+    Ludusavi's asset names carry no architecture, so a mismatch cannot be
+    caught by name the way rclone's could (#23). Upstream builds exactly one
+    Linux target, x86_64, and exactly one macOS target, arm64. Everything else
+    downloads successfully and then fails to exec, and because the unrunnable
+    binary is cached, every later run fails the same way.
+    """
+    import platform
+
+    system = platform.system()
+    machine = platform.machine().lower()
+
+    if system == "Linux" and machine not in ("x86_64", "amd64"):
+        return (
+            f"Ludusavi publishes no Linux build for {platform.machine()} "
+            f"(upstream builds x86_64 only)."
+        )
+    if system == "Darwin" and machine not in ("arm64", "aarch64"):
+        return (
+            f"Ludusavi publishes no macOS build for {platform.machine()} "
+            f"(upstream builds Apple Silicon only; Rosetta cannot run an "
+            f"arm64 binary on Intel)."
+        )
+    return None
+
+
 def _ludusavi_asset_name(release_info: dict[str, Any]) -> str:
     """Return the asset name for the current platform from the release."""
     import platform
+
+    reason = unsupported_architecture_reason()
+    if reason:
+        raise RuntimeError(f"{reason} {_INSTALL_IT_YOURSELF}")
+
     if os.name == "nt":
         suffix = "win64.zip"
     elif platform.system() == "Darwin":
@@ -96,7 +144,9 @@ def _ludusavi_asset_name(release_info: dict[str, Any]) -> str:
         name = str(asset.get("name", ""))
         if name.startswith("ludusavi-") and name.endswith(suffix):
             return name
-    raise RuntimeError(f"Could not find Ludusavi asset for {suffix}")
+    raise RuntimeError(
+        f"This Ludusavi release has no {suffix} build. {_INSTALL_IT_YOURSELF}"
+    )
 
 
 def run_ludusavi(
