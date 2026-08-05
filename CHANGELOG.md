@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Backups to Google Drive no longer pay an API call per directory.** Cloud saves are content-addressed, stored at `blobs/<hh>/<hash>`, which spreads one version across many directories; rclone walked source and destination in step and listed each one. Against a store holding 5000 blobs, a backup with nothing new to send went from 138 requests to 6. This is what made a first upload sit for minutes before moving any data. ([#26](https://github.com/Vasanthdev2004/Game-Save-Genie/issues/26))
+- Restores and uploads run 16 transfers instead of rclone's default 4. A save is many small files, so the time goes into round trips, not bandwidth.
+- **A Ludusavi you installed yourself is now used instead of being ignored.** `gsg` checked PATH for rclone but not for Ludusavi, so a copy from your distro, Homebrew, or your own build was passed over in favour of a download. That matters most where the download cannot work: Ludusavi publishes one Linux build (x86_64) and one macOS build (Apple Silicon), so ARM Linux and Intel Macs have no official binary and previously had no way to supply their own.
+- **`gsg` stops downloading a Ludusavi it cannot run.** Ludusavi's release assets carry no architecture in their names, so the wrong one downloaded happily and failed only when executed — then stayed cached, failing identically on every later run. Unsupported architectures now refuse before downloading and say to install Ludusavi yourself.
+
 ## 0.6.1 — 2026-08-04
 
 
