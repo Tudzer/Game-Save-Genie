@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import logging
 import os
 import sys
@@ -1496,6 +1497,26 @@ def _open_status_window(config_path: Path | None) -> None:
         logging.getLogger(__name__).warning("Could not show status: %s", exc)
 
 
+def encode_vbs(script: str) -> bytes:
+    """Serialize a VBScript the way Windows Script Host actually reads one.
+
+    WSH accepts exactly two forms: the system ANSI codepage, or UTF-16 with a
+    byte order mark. It does not accept UTF-8. A UTF-8 file gets read as ANSI,
+    which is harmless while every character is ASCII and wrong the moment one
+    is not — a user whose Windows profile is ``C:\\Users\\José`` got a startup
+    script pointing at a path that does not exist, silently. Verified: a UTF-8
+    file containing "café" reports Len 5 to WSH; UTF-16 reports 4.
+
+    A UTF-8 *BOM* is worse still. WSH refuses the file outright with
+    "Invalid character" (800A0408) at line 1, char 1, before running anything.
+    That is not a hypothetical either: writing one and running it under cscript
+    reproduces exactly that error, which is how this was found.
+
+    UTF-16LE with a BOM is the form that survives both.
+    """
+    return codecs.BOM_UTF16_LE + script.encode("utf-16-le")
+
+
 def _startup_vbs_path() -> Path:
     startup_dir = (
         Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows"
@@ -1568,14 +1589,14 @@ def _install_startup(config_path: Path | None = None) -> None:
     vbs_path = _startup_vbs_path()
     vbs_path.parent.mkdir(parents=True, exist_ok=True)
     vbs_content = (
-        "On Error Resume Next\n"
-        'Set fso = CreateObject("Scripting.FileSystemObject")\n'
-        f'If fso.FileExists("{gsg_path}") Then\n'
-        '    Set WshShell = CreateObject("WScript.Shell")\n'
-        f'    WshShell.Run "{command}", 0, False\n'
-        "End If\n"
+        "On Error Resume Next\r\n"
+        'Set fso = CreateObject("Scripting.FileSystemObject")\r\n'
+        f'If fso.FileExists("{gsg_path}") Then\r\n'
+        '    Set WshShell = CreateObject("WScript.Shell")\r\n'
+        f'    WshShell.Run "{command}", 0, False\r\n'
+        "End If\r\n"
     )
-    vbs_path.write_text(vbs_content, encoding="utf-8")
+    vbs_path.write_bytes(encode_vbs(vbs_content))
     console.print(f"[green]Installed to Windows startup: {vbs_path}[/green]")
     console.print(
         f"[dim]Runs '{gsg_path}' hidden at logon. Moving the executable breaks "
