@@ -51,6 +51,8 @@ Once you're set up, running `gsg` again opens the **dashboard** — your games, 
 
 **Homelab?** Run your own save server with one `docker compose up` and connect it with `gsg setup-s3` — see [docker/README.md](docker/README.md). Works with any S3-compatible store (MinIO, Garage, TrueNAS…), supports per-friend accounts, and your saves never leave your network.
 
+**Somewhere `gsg` can't run?** The cloud layout is documented in [CLOUD_FORMAT.md](CLOUD_FORMAT.md) — content-addressed blobs plus a small JSON manifest per backup, reachable with rclone and `sha256sum` from a shell script. A handheld or NAS that writes that layout gets restores on the desktop for free.
+
 > **Status:** single-machine backup on Windows is stable and used daily. Cross-machine sync (`gsg pull`) and Linux/Steam Deck support are **beta** — solid in testing, but not yet battle-tested across many real setups. Keep a second copy of anything precious for now, and please [file an issue](https://github.com/Vasanthdev2004/Game-Save-Genie/issues) with anything you hit — that feedback is what moves it out of beta.
 
 ## How it compares
