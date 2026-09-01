@@ -211,7 +211,7 @@ class GameSaveGenieApp(App[None]):
             table.add_row(
                 game.title,
                 str(len(versions)),
-                versions[0].created_at.strftime("%Y-%m-%d %H:%M")
+                versions[0].created_at.astimezone().strftime("%Y-%m-%d %H:%M")
                 if versions
                 else "[yellow]never[/yellow]",
                 _cloud_target(game, config) or "[dim]off[/dim]",
@@ -291,7 +291,7 @@ class GameSaveGenieApp(App[None]):
         self.rows = [
             VersionRow(
                 version_id=v.id,
-                when=v.created_at.strftime("%Y-%m-%d %H:%M"),
+                when=v.created_at.astimezone().strftime("%Y-%m-%d %H:%M"),
                 size=_human_size(v.size_bytes),
                 files=str(v.file_count),
                 state=_sync_display(v, game, config),
