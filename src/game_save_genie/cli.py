@@ -653,7 +653,7 @@ def status(ctx: typer.Context) -> None:
         # local-only by design and would otherwise show as forever-pending.
         display = next((v for v in versions if v.origin != "safety"), None)
         if display:
-            last_backup = display.created_at.strftime("%Y-%m-%d %H:%M")
+            last_backup = display.created_at.astimezone().strftime("%Y-%m-%d %H:%M")
             cloud_synced = _sync_display(display, game, config)
         else:
             never_backed_up.append(game.id)
@@ -916,7 +916,7 @@ def versions(
     for v in versions_list:
         table.add_row(
             v.id,
-            v.created_at.strftime("%Y-%m-%d %H:%M"),
+            v.created_at.astimezone().strftime("%Y-%m-%d %H:%M"),
             _human_size(v.size_bytes),
             str(v.file_count),
             v.source_machine or "unknown",
